@@ -239,8 +239,8 @@
   }
   .cam-frame{position:relative;width:100%;max-width:420px;}
   .cam-guide{
-    position:absolute;left:8%;right:8%;top:35%;bottom:35%;
-    border:2px dashed rgba(198,255,51,.8);
+    position:absolute;left:6%;right:6%;top:15%;bottom:15%;
+    border:2px dashed rgba(198,255,51,.55);
     border-radius:10px;pointer-events:none;
   }
   .cam-status{color:var(--muted);font-size:13px;margin:14px 0;text-align:center;min-height:18px;}
@@ -322,7 +322,7 @@
     <video id="camVideo" playsinline autoplay muted></video>
     <div class="cam-guide"></div>
   </div>
-  <div class="cam-status" id="camStatus">Fill the box with just the code — hold steady, close up</div>
+  <div class="cam-status" id="camStatus">Point the camera at the tag — scanning…</div>
   <div class="cam-actions">
     <button class="cancel" id="camCancel">Cancel</button>
     <button class="capture" id="camCapture">Scan now</button>
@@ -685,7 +685,7 @@ async function ensureWorker(){
   tessWorker = await Tesseract.createWorker("eng");
   await tessWorker.setParameters({
     tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    tessedit_pageseg_mode: "8" // treat as single word — codes are short single tokens
+    tessedit_pageseg_mode: "11" // sparse text — find scattered words/labels anywhere in the frame
   });
   tessReady = true;
 }
@@ -713,27 +713,22 @@ function enhanceCanvas(canvas){
   ctx.putImageData(img,0,0);
 }
 
-function captureCropToCanvas(){
-  const guideBox = document.querySelector(".cam-guide").getBoundingClientRect();
-  const frameBox = document.querySelector(".cam-frame").getBoundingClientRect();
+function captureFrameToCanvas(){
   const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
-  const scaleX = vw / frameBox.width, scaleY = vh / frameBox.height;
-  const sx = (guideBox.left - frameBox.left) * scaleX;
-  const sy = (guideBox.top - frameBox.top) * scaleY;
-  const sw = guideBox.width * scaleX;
-  const sh = guideBox.height * scaleY;
-
-  // Upscale the crop — OCR is far more reliable on larger text. Target a
-  // minimum height so small/thin crops don't starve Tesseract of detail.
-  const UPSCALE_TARGET_H = 220;
-  const scale = Math.max(1, UPSCALE_TARGET_H / sh);
-  camCanvas.width = sw * scale;
-  camCanvas.height = sh * scale;
+  if(!vw || !vh) return false;
+  // Read the whole frame, not just the guide box — precise pixel alignment
+  // to a small box is hard to hit by eye. Downscale to a sane width for
+  // speed, but keep enough resolution for the OCR engine to work with.
+  const TARGET_W = 900;
+  const scale = Math.min(1.5, TARGET_W / vw); // allow slight upscale on small feeds too
+  camCanvas.width = Math.round(vw * scale);
+  camCanvas.height = Math.round(vh * scale);
   const ctx = camCanvas.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, camCanvas.width, camCanvas.height);
+  ctx.drawImage(camVideo, 0, 0, camCanvas.width, camCanvas.height);
   enhanceCanvas(camCanvas);
+  return true;
 }
 
 async function openCamera(){
@@ -746,7 +741,7 @@ async function openCamera(){
     });
     camVideo.srcObject = camStream;
     await ensureWorker();
-    camStatus.textContent = "Align the sort code inside the box — scanning…";
+    camStatus.textContent = "Point the camera at the tag — scanning…";
     scanning = true;
     scanLoopStep();
   }catch(err){
@@ -773,33 +768,47 @@ function acceptScan(candidate){
 async function scanLoopStep(){
   if(!scanning) return;
   try{
-    captureCropToCanvas();
+    const ok = captureFrameToCanvas();
+    if(!ok){ scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS); return; }
     const { data } = await tessWorker.recognize(camCanvas);
-    const candidate = normalizeCode(data.text || "");
     if(!scanning) return; // camera may have been cancelled mid-recognize
 
-    if(candidate.length >= 2){
-      camStatus.textContent = `Scanning… last read: ${candidate}`;
-      const match = findCodeMatch(candidate);
-      if(match.status === "exact"){
-        acceptScan(candidate);
-        return;
-      } else if(match.status === "canonical" || match.status === "fuzzy"){
-        // Rolling vote: keep the last few near-matches and accept once the
-        // same underlying code has come up twice — this tolerates a noisy
-        // frame here and there without ever accepting on a single fluke read.
-        matchHistory.push(match.matchedCode);
-        if(matchHistory.length > 4) matchHistory.shift();
-        const counts = {};
-        for(const c of matchHistory) counts[c] = (counts[c]||0) + 1;
-        const winner = Object.keys(counts).find(c => counts[c] >= 2);
-        if(winner){
-          acceptScan(winner);
-          return;
-        }
-      }
+    // Pull individual words out of the frame (not just the whole blob) so a
+    // code sitting anywhere in view — not just inside the guide box — gets found.
+    const words = (data.words && data.words.length ? data.words.map(w => w.text) : [data.text])
+      .map(normalizeCode)
+      .filter(w => w.length >= 2);
+
+    if(words.length){
+      camStatus.textContent = `Scanning… saw: ${words.slice(0,4).join(", ")}`;
     } else {
-      camStatus.textContent = "Fill the box with just the code — hold steady, close up";
+      camStatus.textContent = "Point the camera at the tag — scanning…";
+    }
+
+    let bestExact = null, bestNear = null, bestNearDist = Infinity;
+    for(const w of words){
+      const match = findCodeMatch(w);
+      if(match.status === "exact"){ bestExact = w; break; }
+      if((match.status === "canonical" || match.status === "fuzzy")){
+        const d = match.status === "canonical" ? 0 : match.distance;
+        if(d < bestNearDist){ bestNearDist = d; bestNear = match.matchedCode; }
+      }
+    }
+
+    if(bestExact){
+      acceptScan(bestExact);
+      return;
+    }
+    if(bestNear){
+      matchHistory.push(bestNear);
+      if(matchHistory.length > 4) matchHistory.shift();
+      const counts = {};
+      for(const c of matchHistory) counts[c] = (counts[c]||0) + 1;
+      const winner = Object.keys(counts).find(c => counts[c] >= 2);
+      if(winner){
+        acceptScan(winner);
+        return;
+      }
     }
   }catch(err){
     console.error(err);
