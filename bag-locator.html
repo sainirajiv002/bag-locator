@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Bag Locator — NCR Bamnoli DC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14171a;
+    --surface:#1c2024;
+    --surface-2:#242930;
+    --line:#33393f;
+    --text:#f3f5f2;
+    --muted:#8b939c;
+    --neon:#c6ff33;
+    --neon-dim:#8fb824;
+    --amber:#ffb020;
+    --red:#ff5d5d;
+    --tag-hole:#0e1012;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, #1a2b12 0%, transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  a{color:inherit;}
+
+  header{
+    padding:18px 18px 10px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{
+    width:34px;height:34px;border-radius:8px;
+    background:var(--neon);
+    display:flex;align-items:center;justify-content:center;
+    color:#101210;font-family:'Archivo Black';font-size:15px;
+    transform:rotate(-4deg);
+    box-shadow:0 2px 0 var(--neon-dim);
+  }
+  .brand h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px;}
+  .brand p{margin:1px 0 0;font-size:11.5px;color:var(--muted);}
+  .sync{
+    display:flex;align-items:center;gap:8px;
+    font-size:11px;color:var(--muted);
+    background:var(--surface);border:1px solid var(--line);
+    padding:6px 10px;border-radius:100px;
+    cursor:pointer;user-select:none;
+    white-space:nowrap;
+  }
+  .sync .dot{width:7px;height:7px;border-radius:50%;background:var(--neon);box-shadow:0 0 8px var(--neon);}
+  .sync.stale .dot{background:var(--amber);box-shadow:0 0 8px var(--amber);}
+  .sync.error .dot{background:var(--red);box-shadow:0 0 8px var(--red);}
+  .sync svg{width:13px;height:13px;opacity:.7;}
+
+  main{
+    flex:1;
+    width:100%;
+    max-width:520px;
+    margin:0 auto;
+    padding:6px 18px 40px;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .tabs{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:4px;
+    margin:14px 0 20px;
+  }
+  .tabs button{
+    appearance:none;border:0;background:transparent;color:var(--muted);
+    font-family:inherit;font-weight:700;font-size:13.5px;letter-spacing:.2px;
+    padding:12px 8px;border-radius:10px;cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+  }
+  .tabs button.active{background:var(--neon);color:#101210;}
+
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  label.field-label{
+    display:block;font-size:11.5px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.08em;margin:0 2px 8px;
+  }
+
+  .input-row{display:flex;gap:8px;}
+  .code-input{
+    flex:1;
+    background:var(--surface);
+    border:1.5px solid var(--line);
+    color:var(--text);
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:600;
+    font-size:22px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    border-radius:14px;
+    padding:16px 16px;
+    outline:none;
+    min-width:0;
+  }
+  .code-input:focus{border-color:var(--neon);}
+  .code-input::placeholder{color:#565d64;font-weight:500;letter-spacing:0;text-transform:none;font-family:'Inter';font-size:15px;}
+
+  .cam-btn{
+    width:58px;flex:0 0 58px;
+    background:var(--surface-2);
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+  }
+  .cam-btn svg{width:24px;height:24px;color:var(--neon);}
+  .cam-btn:active{background:var(--surface);}
+
+  .go-btn{
+    margin-top:10px;
+    width:100%;
+    background:var(--neon);
+    color:#101210;
+    border:0;
+    font-family:inherit;font-weight:700;font-size:15px;
+    padding:15px;border-radius:14px;cursor:pointer;
+  }
+  .go-btn:active{background:var(--neon-dim);}
+  .go-btn:disabled{opacity:.4;}
+
+  .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;}
+
+  /* Autocomplete for rider seller search */
+  .ac-wrap{position:relative;}
+  .ac-list{
+    position:absolute;left:0;right:0;top:calc(100% + 6px);
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:14px;
+    max-height:260px;overflow-y:auto;
+    z-index:20;
+    display:none;
+    box-shadow:0 12px 24px rgba(0,0,0,.4);
+  }
+  .ac-list.open{display:block;}
+  .ac-item{
+    padding:13px 16px;font-size:14.5px;font-weight:500;
+    border-bottom:1px solid var(--line);cursor:pointer;
+  }
+  .ac-item:last-child{border-bottom:none;}
+  .ac-item:active,.ac-item.hi{background:var(--surface);}
+  .ac-item b{color:var(--neon);font-weight:700;}
+  .ac-empty{padding:14px 16px;font-size:13px;color:var(--muted);}
+
+  /* Results */
+  .results{margin-top:22px;display:flex;flex-direction:column;gap:14px;}
+
+  .status-note{
+    font-size:12.5px; padding:10px 14px; border-radius:10px;
+    background:var(--surface-2); border:1px solid var(--line); color:var(--muted);
+  }
+  .status-note.warn{border-color:#5a4a1a;color:var(--amber);}
+  .status-note.err{border-color:#5a2323;color:var(--red);}
+
+  /* Signature: the tag card, echoing the physical neon PRN tag */
+  .tag{
+    position:relative;
+    background:var(--neon);
+    color:#101210;
+    border-radius:16px;
+    padding:22px 22px 20px 34px;
+    overflow:visible;
+  }
+  .tag::before{
+    content:"";
+    position:absolute;
+    left:14px; top:50%; transform:translateY(-50%);
+    width:14px;height:14px;border-radius:50%;
+    background:var(--tag-hole);
+    box-shadow:0 0 0 3px rgba(16,18,16,.15);
+  }
+  .tag .eyebrow{
+    font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+    opacity:.65;margin:0 0 4px;
+  }
+  .tag .loc{
+    font-family:'Archivo Black';
+    font-size:clamp(30px, 9vw, 42px);
+    line-height:1.02;
+    margin:0 0 10px;
+    word-break:break-word;
+  }
+  .tag .meta{
+    display:flex;justify-content:space-between;align-items:flex-end;gap:10px;
+    border-top:1.5px dashed rgba(16,18,16,.3);
+    padding-top:10px;
+    font-family:'IBM Plex Mono',monospace;
+  }
+  .tag .meta .k{font-size:9.5px;opacity:.6;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:2px;font-family:'Inter';font-weight:700;}
+  .tag .meta .v{font-size:15px;font-weight:600;}
+  .tag .match-note{
+    margin-top:10px;font-size:11.5px;font-weight:600;
+    background:rgba(16,18,16,.12);
+    padding:6px 10px;border-radius:8px;
+  }
+
+  .tag.dim{background:var(--surface-2);color:var(--text);}
+  .tag.dim::before{background:var(--bg);}
+  .tag.dim .meta{border-top-color:var(--line);}
+
+  /* Camera modal */
+  .cam-modal{
+    position:fixed;inset:0;background:rgba(6,7,8,.92);
+    display:none;align-items:center;justify-content:center;
+    z-index:100;padding:20px;
+    flex-direction:column;
+  }
+  .cam-modal.open{display:flex;}
+  .cam-modal video{
+    width:100%;max-width:420px;border-radius:16px;
+    border:2px solid var(--neon);
+    background:#000;
+  }
+  .cam-frame{position:relative;width:100%;max-width:420px;}
+  .cam-guide{
+    position:absolute;left:15%;right:15%;top:40%;bottom:40%;
+    border:2px dashed rgba(198,255,51,.8);
+    border-radius:10px;pointer-events:none;
+  }
+  .cam-status{color:var(--muted);font-size:13px;margin:14px 0;text-align:center;min-height:18px;}
+  .cam-actions{display:flex;gap:10px;width:100%;max-width:420px;}
+  .cam-actions button{
+    flex:1;padding:14px;border-radius:12px;border:0;font-family:inherit;font-weight:700;font-size:14px;cursor:pointer;
+  }
+  .cam-actions .capture{background:var(--neon);color:#101210;}
+  .cam-actions .cancel{background:var(--surface-2);color:var(--text);border:1px solid var(--line);}
+
+  footer{
+    text-align:center;padding:10px 18px 26px;
+    font-size:11px;color:#565d64;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div>
+      <h1>Bag Locator</h1>
+      <p>NCR Bamnoli DC · RTS pendency</p>
+    </div>
+  </div>
+  <div class="sync stale" id="syncPill" title="Tap to refresh now">
+    <span class="dot"></span>
+    <span id="syncText">Loading…</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+  </div>
+</header>
+
+<main>
+
+  <div class="tabs">
+    <button id="tabSort" class="active">Sort Bag</button>
+    <button id="tabFind">Find My Bag</button>
+  </div>
+
+  <!-- SORTER PANEL -->
+  <section id="panelSort" class="panel active">
+    <label class="field-label" for="codeInput">Sort code</label>
+    <div class="input-row">
+      <input id="codeInput" class="code-input" placeholder="e.g. 7A28" autocomplete="off" autocapitalize="characters" maxlength="12" inputmode="text">
+      <div class="cam-btn" id="openCam" title="Scan with camera">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </div>
+    </div>
+    <button class="go-btn" id="lookupBtn">Find placement location</button>
+    <p class="hint">Scan with the handheld scanner (it types the code automatically), use the camera, or type it in — then press Enter.</p>
+
+    <div class="results" id="sortResults"></div>
+  </section>
+
+  <!-- RIDER PANEL -->
+  <section id="panelFind" class="panel">
+    <label class="field-label" for="sellerInput">Seller name</label>
+    <div class="ac-wrap">
+      <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller name…" autocomplete="off">
+      <div class="ac-list" id="acList"></div>
+    </div>
+    <p class="hint">Pick your seller from the list to see where the bag was placed.</p>
+
+    <div class="results" id="findResults"></div>
+  </section>
+
+</main>
+
+<footer>Data synced from Google Sheets · read-only lookup</footer>
+
+<!-- Camera / OCR modal -->
+<div class="cam-modal" id="camModal">
+  <div class="cam-frame">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <div class="cam-guide"></div>
+  </div>
+  <div class="cam-status" id="camStatus">Align the sort code inside the box</div>
+  <div class="cam-actions">
+    <button class="cancel" id="camCancel">Cancel</button>
+    <button class="capture" id="camCapture">Capture &amp; Read</button>
+  </div>
+</div>
+
+<canvas id="camCanvas" style="display:none;"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script>
+/* ======================= CONFIG ======================= */
+// 1. Create a Google Sheet with headers exactly: Seller Name | Sort Code | Placement Location
+// 2. File > Share > "Anyone with the link" set to Viewer
+// 3. Paste the Sheet ID below (the long id in the sheet's URL between /d/ and /edit)
+// 4. Set SHEET_TAB to the exact name of the tab/worksheet holding the data (bottom tab label)
+const SHEET_ID  = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
+const SHEET_TAB = "Sheet1";
+const REFRESH_MS = 30000; // re-pull the sheet every 30s
+/* ======================================================= */
+
+const dataUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_TAB)}`;
+
+let ROWS = [];          // [{seller, code, location}]
+let CODE_INDEX = new Map(); // normalized code -> row
+let lastSync = null;
+let syncTimer = null;
+
+/* ---------- CSV parsing (handles quoted commas) ---------- */
+function parseCSV(text){
+  const rows = [];
+  let row = [], cell = "", inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i], n = text[i+1];
+    if(inQuotes){
+      if(c === '"' && n === '"'){ cell += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else { cell += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(cell); cell=""; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && n === '\n') i++;
+        row.push(cell); cell="";
+        rows.push(row); row=[];
+      } else { cell += c; }
+    }
+  }
+  if(cell.length || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+
+function findCol(header, names){
+  const norm = h => h.toLowerCase().replace(/[^a-z]/g,"");
+  for(const name of names){
+    const idx = header.findIndex(h => norm(h) === norm(name));
+    if(idx !== -1) return idx;
+  }
+  return -1;
+}
+
+async function pullSheet(){
+  setSyncState("loading");
+  try{
+    const res = await fetch(dataUrl, {cache:"no-store"});
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
+    const table = parseCSV(text);
+    if(!table.length) throw new Error("Empty sheet");
+    const header = table[0];
+    const sellerCol = findCol(header, ["Seller Name","Seller"]);
+    const codeCol   = findCol(header, ["Sort Code","SortCode","Code"]);
+    const locCol    = findCol(header, ["Placement Location","Location"]);
+    if(sellerCol === -1 || codeCol === -1 || locCol === -1){
+      throw new Error("Header columns not found — expected Seller Name / Sort Code / Placement Location");
+    }
+    const rows = table.slice(1).map(r => ({
+      seller: (r[sellerCol]||"").trim(),
+      code: (r[codeCol]||"").trim(),
+      location: (r[locCol]||"").trim()
+    })).filter(r => r.code || r.seller);
+
+    ROWS = rows;
+    CODE_INDEX = new Map();
+    for(const r of rows){
+      const key = normalizeCode(r.code);
+      if(key) CODE_INDEX.set(key, r);
+    }
+    lastSync = new Date();
+    setSyncState("ok");
+  }catch(err){
+    console.error(err);
+    setSyncState("error", err.message);
+  }
+}
+
+function setSyncState(state, msg){
+  const pill = document.getElementById("syncPill");
+  const txt = document.getElementById("syncText");
+  pill.classList.remove("stale","error");
+  if(state === "loading"){
+    txt.textContent = "Syncing…";
+  } else if(state === "ok"){
+    txt.textContent = "Synced just now";
+  } else if(state === "error"){
+    pill.classList.add("error");
+    txt.textContent = "Sync failed";
+  }
+}
+
+function tickSyncLabel(){
+  if(!lastSync) return;
+  const secs = Math.round((Date.now() - lastSync.getTime())/1000);
+  const pill = document.getElementById("syncPill");
+  const txt = document.getElementById("syncText");
+  if(pill.classList.contains("error")) return;
+  pill.classList.toggle("stale", secs > 90);
+  if(secs < 5) txt.textContent = "Synced just now";
+  else if(secs < 60) txt.textContent = `Synced ${secs}s ago`;
+  else txt.textContent = `Synced ${Math.round(secs/60)}m ago`;
+}
+setInterval(tickSyncLabel, 1000);
+
+document.getElementById("syncPill").addEventListener("click", pullSheet);
+
+/* ---------- Fuzzy matching for hazy scans ---------- */
+// Canonicalize commonly-confused OCR / handwriting characters so
+// visually-similar codes compare as equal before falling back to edit distance.
+const CONFUSABLE_MAP = { "O":"0","Q":"0","D":"0","I":"1","L":"1","Z":"2","S":"5","B":"8","G":"6","T":"7" };
+function normalizeCode(raw){
+  return (raw||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+}
+function canonicalize(code){
+  return normalizeCode(code).split("").map(ch => CONFUSABLE_MAP[ch] || ch).join("");
+}
+function levenshtein(a,b){
+  const m=a.length,n=b.length;
+  const dp = Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
+  for(let j=0;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j-1],dp[i-1][j],dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function findCodeMatch(rawInput){
+  const key = normalizeCode(rawInput);
+  if(!key) return {status:"empty"};
+
+  // 1. exact match
+  if(CODE_INDEX.has(key)){
+    return {status:"exact", row: CODE_INDEX.get(key)};
+  }
+
+  // 2. canonicalized (confusable-normalized) exact match
+  const canonInput = canonicalize(key);
+  for(const [code, row] of CODE_INDEX){
+    if(canonicalize(code) === canonInput){
+      return {status:"canonical", row, matchedCode: code};
+    }
+  }
+
+  // 3. nearest by edit distance (on canonicalized strings)
+  let best = null, bestDist = Infinity, second = null;
+  for(const [code, row] of CODE_INDEX){
+    const d = levenshtein(canonInput, canonicalize(code));
+    if(d < bestDist){ second = best; best = {row, code, d}; bestDist = d; }
+  }
+  if(best && bestDist <= 2){
+    return {status:"fuzzy", row: best.row, matchedCode: best.code, distance: bestDist};
+  }
+  return {status:"notfound"};
+}
+
+/* ---------- Tabs ---------- */
+const tabSort = document.getElementById("tabSort");
+const tabFind = document.getElementById("tabFind");
+const panelSort = document.getElementById("panelSort");
+const panelFind = document.getElementById("panelFind");
+tabSort.addEventListener("click", ()=>{
+  tabSort.classList.add("active"); tabFind.classList.remove("active");
+  panelSort.classList.add("active"); panelFind.classList.remove("active");
+  document.getElementById("codeInput").focus();
+});
+tabFind.addEventListener("click", ()=>{
+  tabFind.classList.add("active"); tabSort.classList.remove("active");
+  panelFind.classList.add("active"); panelSort.classList.remove("active");
+  document.getElementById("sellerInput").focus();
+});
+
+/* ---------- Sorter flow ---------- */
+const codeInput = document.getElementById("codeInput");
+const sortResults = document.getElementById("sortResults");
+
+function renderSortResult(input){
+  const match = findCodeMatch(input);
+  sortResults.innerHTML = "";
+
+  if(match.status === "empty") return;
+
+  if(match.status === "notfound"){
+    sortResults.innerHTML = `<div class="status-note err">No location found for "<b>${escapeHtml(input.toUpperCase())}</b>". Double-check the code on the tag, or check with your supervisor — it may not be in today's sheet yet.</div>`;
+    return;
+  }
+
+  const row = match.row;
+  let noteHtml = "";
+  if(match.status === "canonical" || match.status === "fuzzy"){
+    noteHtml = `<div class="match-note">Closest match to "${escapeHtml(input.toUpperCase())}" → using code ${escapeHtml(match.matchedCode)}. Confirm the seller name below matches the tag.</div>`;
+  }
+
+  sortResults.innerHTML = `
+    <div class="tag">
+      <div class="eyebrow">Place this bag at</div>
+      <div class="loc">${escapeHtml(row.location || "—")}</div>
+      <div class="meta">
+        <div><span class="k">Sort code</span><span class="v">${escapeHtml(row.code)}</span></div>
+        <div><span class="k">Seller</span><span class="v">${escapeHtml(row.seller || "—")}</span></div>
+      </div>
+      ${noteHtml}
+    </div>`;
+}
+
+document.getElementById("lookupBtn").addEventListener("click", ()=> renderSortResult(codeInput.value));
+codeInput.addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){ e.preventDefault(); renderSortResult(codeInput.value); }
+});
+// Physical scanners behave like fast typing ending in Enter — the listener above covers it.
+// Auto-clear+focus after a short pause so the next scan starts fresh.
+codeInput.addEventListener("focus", ()=> codeInput.select());
+
+/* ---------- Rider flow ---------- */
+const sellerInput = document.getElementById("sellerInput");
+const acList = document.getElementById("acList");
+const findResults = document.getElementById("findResults");
+let hiIndex = -1;
+let currentOptions = [];
+
+function uniqueSellers(){
+  const seen = new Set(), out=[];
+  for(const r of ROWS){
+    if(r.seller && !seen.has(r.seller.toLowerCase())){
+      seen.add(r.seller.toLowerCase());
+      out.push(r.seller);
+    }
+  }
+  return out;
+}
+
+function renderAutocomplete(q){
+  const query = q.trim().toLowerCase();
+  hiIndex = -1;
+  if(!query){ acList.classList.remove("open"); acList.innerHTML=""; return; }
+  const all = uniqueSellers();
+  currentOptions = all.filter(s => s.toLowerCase().includes(query)).slice(0,30);
+  if(!currentOptions.length){
+    acList.innerHTML = `<div class="ac-empty">No sellers match "${escapeHtml(q)}"</div>`;
+    acList.classList.add("open");
+    return;
+  }
+  acList.innerHTML = currentOptions.map((s,i)=>{
+    const idx = s.toLowerCase().indexOf(query);
+    const marked = idx === -1 ? escapeHtml(s) :
+      escapeHtml(s.slice(0,idx)) + "<b>" + escapeHtml(s.slice(idx, idx+query.length)) + "</b>" + escapeHtml(s.slice(idx+query.length));
+    return `<div class="ac-item" data-idx="${i}">${marked}</div>`;
+  }).join("");
+  acList.classList.add("open");
+}
+
+sellerInput.addEventListener("input", ()=> renderAutocomplete(sellerInput.value));
+sellerInput.addEventListener("focus", ()=> { if(sellerInput.value.trim()) renderAutocomplete(sellerInput.value); });
+document.addEventListener("click", (e)=>{
+  if(!e.target.closest(".ac-wrap")) acList.classList.remove("open");
+});
+acList.addEventListener("click", (e)=>{
+  const item = e.target.closest(".ac-item");
+  if(!item) return;
+  const s = currentOptions[+item.dataset.idx];
+  if(s){ selectSeller(s); }
+});
+sellerInput.addEventListener("keydown", (e)=>{
+  const items = [...acList.querySelectorAll(".ac-item")];
+  if(e.key === "ArrowDown"){ e.preventDefault(); hiIndex = Math.min(hiIndex+1, items.length-1); highlight(items); }
+  else if(e.key === "ArrowUp"){ e.preventDefault(); hiIndex = Math.max(hiIndex-1, 0); highlight(items); }
+  else if(e.key === "Enter"){
+    e.preventDefault();
+    if(hiIndex >= 0 && currentOptions[hiIndex]) selectSeller(currentOptions[hiIndex]);
+    else if(currentOptions.length === 1) selectSeller(currentOptions[0]);
+  }
+});
+function highlight(items){
+  items.forEach((it,i)=> it.classList.toggle("hi", i===hiIndex));
+  if(items[hiIndex]) items[hiIndex].scrollIntoView({block:"nearest"});
+}
+
+function selectSeller(name){
+  sellerInput.value = name;
+  acList.classList.remove("open");
+  const matches = ROWS.filter(r => r.seller.toLowerCase() === name.toLowerCase());
+  if(!matches.length){
+    findResults.innerHTML = `<div class="status-note err">No bag found for "${escapeHtml(name)}".</div>`;
+    return;
+  }
+  findResults.innerHTML = matches.map(r => `
+    <div class="tag">
+      <div class="eyebrow">Pick up at</div>
+      <div class="loc">${escapeHtml(r.location || "—")}</div>
+      <div class="meta">
+        <div><span class="k">Sort code</span><span class="v">${escapeHtml(r.code)}</span></div>
+        <div><span class="k">Seller</span><span class="v">${escapeHtml(r.seller)}</span></div>
+      </div>
+    </div>`).join("");
+  if(matches.length > 1){
+    findResults.insertAdjacentHTML("afterbegin",
+      `<div class="status-note">${matches.length} bags found for this seller — check every location.</div>`);
+  }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ---------- Camera + OCR scanning ---------- */
+const camModal = document.getElementById("camModal");
+const camVideo = document.getElementById("camVideo");
+const camCanvas = document.getElementById("camCanvas");
+const camStatus = document.getElementById("camStatus");
+let camStream = null;
+let tessWorker = null;
+
+async function openCamera(){
+  camModal.classList.add("open");
+  camStatus.textContent = "Starting camera…";
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
+    });
+    camVideo.srcObject = camStream;
+    camStatus.textContent = "Align the sort code inside the box, then tap Capture";
+  }catch(err){
+    camStatus.textContent = "Camera unavailable — check permissions, or type the code instead.";
+  }
+}
+
+function closeCamera(){
+  camModal.classList.remove("open");
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream = null; }
+}
+
+document.getElementById("openCam").addEventListener("click", openCamera);
+document.getElementById("camCancel").addEventListener("click", closeCamera);
+
+document.getElementById("camCapture").addEventListener("click", async ()=>{
+  if(!camStream) return;
+  camStatus.textContent = "Reading…";
+  const guideBox = document.querySelector(".cam-guide").getBoundingClientRect();
+  const frameBox = document.querySelector(".cam-frame").getBoundingClientRect();
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+  const scaleX = vw / frameBox.width, scaleY = vh / frameBox.height;
+
+  const sx = (guideBox.left - frameBox.left) * scaleX;
+  const sy = (guideBox.top - frameBox.top) * scaleY;
+  const sw = guideBox.width * scaleX;
+  const sh = guideBox.height * scaleY;
+
+  camCanvas.width = sw; camCanvas.height = sh;
+  const ctx = camCanvas.getContext("2d");
+  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  try{
+    if(!tessWorker){
+      camStatus.textContent = "Loading reader (first scan only)…";
+      tessWorker = await Tesseract.createWorker("eng");
+      await tessWorker.setParameters({
+        tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        tessedit_pageseg_mode: "7" // treat as single text line
+      });
+    }
+    camStatus.textContent = "Reading…";
+    const { data } = await tessWorker.recognize(camCanvas);
+    const raw = (data.text || "").trim();
+    const cleaned = normalizeCode(raw);
+    if(!cleaned){
+      camStatus.textContent = "Couldn't read a code — try again or type it manually.";
+      return;
+    }
+    closeCamera();
+    codeInput.value = cleaned;
+    renderSortResult(cleaned);
+  }catch(err){
+    console.error(err);
+    camStatus.textContent = "Reading failed — try again or type the code manually.";
+  }
+});
+
+/* ---------- Boot ---------- */
+pullSheet();
+setInterval(pullSheet, REFRESH_MS);
+</script>
+</body>
+</html>
