@@ -331,7 +331,7 @@
 
 <canvas id="camCanvas" style="display:none;"></canvas>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 /* ======================= CONFIG ======================= */
 // 1. Create a Google Sheet with headers exactly: Seller Name | Sort Code | Placement Location
@@ -679,6 +679,9 @@ const SCAN_INTERVAL_MS = 250; // gap between OCR attempts while nothing found
 
 async function ensureWorker(){
   if(tessReady) return;
+  if(typeof Tesseract === "undefined"){
+    throw new Error("OCR library failed to load — check your internet connection");
+  }
   camStatus.textContent = "Loading reader (first time only)…";
   tessWorker = await Tesseract.createWorker("eng");
   await tessWorker.setParameters({
@@ -740,7 +743,8 @@ async function openCamera(){
     scanning = true;
     scanLoopStep();
   }catch(err){
-    camStatus.textContent = "Camera unavailable — check permissions, or type the code instead.";
+    console.error(err);
+    camStatus.textContent = "Couldn't start: " + err.message + " — you can still type the code manually.";
   }
 }
 
