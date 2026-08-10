@@ -478,19 +478,28 @@ function findCodeMatch(rawInput){
     return {status:"exact", row: CODE_INDEX.get(key)};
   }
 
+  // Reject candidates whose length is way off from any real code — a 2-char
+  // OCR fragment like "SL" or "BJ" should never be allowed to "fuzzy match"
+  // a 4-char code just because edit distance tolerates padding it out.
+  const codeLengths = new Set([...CODE_INDEX.keys()].map(c => c.length));
+  const closeEnoughLength = [...codeLengths].some(len => Math.abs(len - key.length) <= 1);
+  if(!closeEnoughLength) return {status:"notfound"};
+
   // 2. canonicalized (confusable-normalized) exact match
   const canonInput = canonicalize(key);
   for(const [code, row] of CODE_INDEX){
-    if(canonicalize(code) === canonInput){
+    if(code.length === key.length && canonicalize(code) === canonInput){
       return {status:"canonical", row, matchedCode: code};
     }
   }
 
-  // 3. nearest by edit distance (on canonicalized strings)
-  let best = null, bestDist = Infinity, second = null;
+  // 3. nearest by edit distance (on canonicalized strings) — only among
+  // codes whose length is within 1 of the candidate's length
+  let best = null, bestDist = Infinity;
   for(const [code, row] of CODE_INDEX){
+    if(Math.abs(code.length - key.length) > 1) continue;
     const d = levenshtein(canonInput, canonicalize(code));
-    if(d < bestDist){ second = best; best = {row, code, d}; bestDist = d; }
+    if(d < bestDist){ best = {row, code, d}; bestDist = d; }
   }
   if(best && bestDist <= 2){
     return {status:"fuzzy", row: best.row, matchedCode: best.code, distance: bestDist};
