@@ -674,6 +674,8 @@ let tessReady = false;
 let scanning = false;
 let scanTimer = null;
 let matchHistory = [];
+let rotationIndex = 0;
+const ROTATIONS = [0, 90, 270, 180]; // upright and sideways tried first; upside-down last (rarest)
 const SCAN_INTERVAL_MS = 250; // gap between OCR attempts while nothing found
 
 async function ensureWorker(){
@@ -713,7 +715,7 @@ function enhanceCanvas(canvas){
   ctx.putImageData(img,0,0);
 }
 
-function captureFrameToCanvas(){
+function captureFrameToCanvas(rotationDeg){
   const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
   if(!vw || !vh) return false;
   // Read the whole frame, not just the guide box — precise pixel alignment
@@ -721,12 +723,18 @@ function captureFrameToCanvas(){
   // speed, but keep enough resolution for the OCR engine to work with.
   const TARGET_W = 900;
   const scale = Math.min(1.5, TARGET_W / vw); // allow slight upscale on small feeds too
-  camCanvas.width = Math.round(vw * scale);
-  camCanvas.height = Math.round(vh * scale);
+  const dw = Math.round(vw * scale), dh = Math.round(vh * scale);
+  const swapped = (rotationDeg === 90 || rotationDeg === 270);
+  camCanvas.width = swapped ? dh : dw;
+  camCanvas.height = swapped ? dw : dh;
   const ctx = camCanvas.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(camVideo, 0, 0, camCanvas.width, camCanvas.height);
+  ctx.save();
+  ctx.translate(camCanvas.width/2, camCanvas.height/2);
+  ctx.rotate(rotationDeg * Math.PI/180);
+  ctx.drawImage(camVideo, -dw/2, -dh/2, dw, dh);
+  ctx.restore();
   enhanceCanvas(camCanvas);
   return true;
 }
@@ -735,6 +743,7 @@ async function openCamera(){
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
   matchHistory = [];
+  rotationIndex = 0;
   try{
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
@@ -768,7 +777,9 @@ function acceptScan(candidate){
 async function scanLoopStep(){
   if(!scanning) return;
   try{
-    const ok = captureFrameToCanvas();
+    const rotation = ROTATIONS[rotationIndex % ROTATIONS.length];
+    rotationIndex++;
+    const ok = captureFrameToCanvas(rotation);
     if(!ok){ scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS); return; }
     const { data } = await tessWorker.recognize(camCanvas);
     if(!scanning) return; // camera may have been cancelled mid-recognize
