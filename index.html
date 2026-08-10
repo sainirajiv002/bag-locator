@@ -295,7 +295,7 @@
       </div>
     </div>
     <button class="go-btn" id="lookupBtn">Find placement location</button>
-    <p class="hint">Scan with the handheld scanner (it types the code automatically), use the camera, or type it in — then press Enter.</p>
+    <p class="hint">Scan with the handheld scanner, use the camera, or type the code — the location shows instantly, no need to press anything.</p>
 
     <div class="results" id="sortResults"></div>
   </section>
@@ -322,10 +322,10 @@
     <video id="camVideo" playsinline autoplay muted></video>
     <div class="cam-guide"></div>
   </div>
-  <div class="cam-status" id="camStatus">Align the sort code inside the box</div>
+  <div class="cam-status" id="camStatus">Align the sort code inside the box — scanning…</div>
   <div class="cam-actions">
     <button class="cancel" id="camCancel">Cancel</button>
-    <button class="capture" id="camCapture">Capture &amp; Read</button>
+    <button class="capture" id="camCapture">Scan now</button>
   </div>
 </div>
 
@@ -551,8 +551,25 @@ document.getElementById("lookupBtn").addEventListener("click", ()=> renderSortRe
 codeInput.addEventListener("keydown", (e)=>{
   if(e.key === "Enter"){ e.preventDefault(); renderSortResult(codeInput.value); }
 });
-// Physical scanners behave like fast typing ending in Enter — the listener above covers it.
-// Auto-clear+focus after a short pause so the next scan starts fresh.
+
+// Instant lookup: fires automatically once the typed/scanned text reaches the
+// sheet's known code length — no need to press Enter or the button. Covers
+// both manual typing and physical keyboard-wedge scanners (which type fast + Enter).
+let typeTimer = null;
+codeInput.addEventListener("input", ()=>{
+  clearTimeout(typeTimer);
+  const val = normalizeCode(codeInput.value);
+  if(!val){ sortResults.innerHTML = ""; return; }
+  if(val.length >= minCodeLength()){
+    typeTimer = setTimeout(()=> renderSortResult(codeInput.value), 80);
+  }
+});
+function minCodeLength(){
+  let min = Infinity;
+  for(const code of CODE_INDEX.keys()) if(code.length < min) min = code.length;
+  return Number.isFinite(min) ? min : 4;
+}
+
 codeInput.addEventListener("focus", ()=> codeInput.select());
 
 /* ---------- Rider flow ---------- */
@@ -646,77 +663,147 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
-/* ---------- Camera + OCR scanning ---------- */
+/* ---------- Camera + OCR scanning (continuous, auto-accept) ---------- */
 const camModal = document.getElementById("camModal");
 const camVideo = document.getElementById("camVideo");
 const camCanvas = document.getElementById("camCanvas");
 const camStatus = document.getElementById("camStatus");
 let camStream = null;
 let tessWorker = null;
+let tessReady = false;
+let scanning = false;
+let scanTimer = null;
+let lastCandidate = "";
+let candidateStreak = 0;
+const SCAN_INTERVAL_MS = 250; // gap between OCR attempts while nothing found
+
+async function ensureWorker(){
+  if(tessReady) return;
+  camStatus.textContent = "Loading reader (first time only)…";
+  tessWorker = await Tesseract.createWorker("eng");
+  await tessWorker.setParameters({
+    tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    tessedit_pageseg_mode: "8" // treat as single word — codes are short single tokens
+  });
+  tessReady = true;
+}
+
+// Grayscale + contrast-stretch the cropped frame so faint/glare-y prints read more reliably.
+function enhanceCanvas(canvas){
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+  const n = w*h;
+  const gray = new Uint8ClampedArray(n);
+  let min = 255, max = 0;
+  for(let i=0, p=0; i<d.length; i+=4, p++){
+    const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    gray[p] = g;
+    if(g < min) min = g;
+    if(g > max) max = g;
+  }
+  const range = Math.max(1, max - min);
+  for(let i=0, p=0; i<d.length; i+=4, p++){
+    const v = Math.round((gray[p]-min) / range * 255);
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function captureCropToCanvas(){
+  const guideBox = document.querySelector(".cam-guide").getBoundingClientRect();
+  const frameBox = document.querySelector(".cam-frame").getBoundingClientRect();
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+  const scaleX = vw / frameBox.width, scaleY = vh / frameBox.height;
+  const sx = (guideBox.left - frameBox.left) * scaleX;
+  const sy = (guideBox.top - frameBox.top) * scaleY;
+  const sw = guideBox.width * scaleX;
+  const sh = guideBox.height * scaleY;
+  camCanvas.width = sw; camCanvas.height = sh;
+  const ctx = camCanvas.getContext("2d");
+  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, sw, sh);
+  enhanceCanvas(camCanvas);
+}
 
 async function openCamera(){
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
+  lastCandidate = ""; candidateStreak = 0;
   try{
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
     });
     camVideo.srcObject = camStream;
-    camStatus.textContent = "Align the sort code inside the box, then tap Capture";
+    await ensureWorker();
+    camStatus.textContent = "Align the sort code inside the box — scanning…";
+    scanning = true;
+    scanLoopStep();
   }catch(err){
     camStatus.textContent = "Camera unavailable — check permissions, or type the code instead.";
   }
 }
 
 function closeCamera(){
+  scanning = false;
+  clearTimeout(scanTimer);
   camModal.classList.remove("open");
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream = null; }
 }
 
-document.getElementById("openCam").addEventListener("click", openCamera);
-document.getElementById("camCancel").addEventListener("click", closeCamera);
+function acceptScan(candidate){
+  scanning = false;
+  clearTimeout(scanTimer);
+  closeCamera();
+  codeInput.value = candidate;
+  renderSortResult(candidate);
+}
 
-document.getElementById("camCapture").addEventListener("click", async ()=>{
-  if(!camStream) return;
-  camStatus.textContent = "Reading…";
-  const guideBox = document.querySelector(".cam-guide").getBoundingClientRect();
-  const frameBox = document.querySelector(".cam-frame").getBoundingClientRect();
-  const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
-  const scaleX = vw / frameBox.width, scaleY = vh / frameBox.height;
-
-  const sx = (guideBox.left - frameBox.left) * scaleX;
-  const sy = (guideBox.top - frameBox.top) * scaleY;
-  const sw = guideBox.width * scaleX;
-  const sh = guideBox.height * scaleY;
-
-  camCanvas.width = sw; camCanvas.height = sh;
-  const ctx = camCanvas.getContext("2d");
-  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, sw, sh);
-
+async function scanLoopStep(){
+  if(!scanning) return;
   try{
-    if(!tessWorker){
-      camStatus.textContent = "Loading reader (first scan only)…";
-      tessWorker = await Tesseract.createWorker("eng");
-      await tessWorker.setParameters({
-        tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        tessedit_pageseg_mode: "7" // treat as single text line
-      });
-    }
-    camStatus.textContent = "Reading…";
+    captureCropToCanvas();
     const { data } = await tessWorker.recognize(camCanvas);
-    const raw = (data.text || "").trim();
-    const cleaned = normalizeCode(raw);
-    if(!cleaned){
-      camStatus.textContent = "Couldn't read a code — try again or type it manually.";
-      return;
+    const candidate = normalizeCode(data.text || "");
+    if(!scanning) return; // camera may have been cancelled mid-recognize
+
+    if(candidate.length >= 3){
+      camStatus.textContent = `Scanning… last read: ${candidate}`;
+      const match = findCodeMatch(candidate);
+      if(match.status === "exact"){
+        acceptScan(candidate);
+        return;
+      } else if(match.status === "canonical" || match.status === "fuzzy"){
+        // require the same near-match twice in a row before auto-accepting,
+        // so a single noisy OCR read can't place a bag at the wrong location
+        if(candidate === lastCandidate){
+          candidateStreak++;
+        } else {
+          lastCandidate = candidate;
+          candidateStreak = 1;
+        }
+        if(candidateStreak >= 2){
+          acceptScan(match.matchedCode);
+          return;
+        }
+      } else {
+        lastCandidate = ""; candidateStreak = 0;
+      }
+    } else {
+      camStatus.textContent = "Align the sort code inside the box — scanning…";
     }
-    closeCamera();
-    codeInput.value = cleaned;
-    renderSortResult(cleaned);
   }catch(err){
     console.error(err);
-    camStatus.textContent = "Reading failed — try again or type the code manually.";
   }
+  scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS);
+}
+
+document.getElementById("openCam").addEventListener("click", openCamera);
+document.getElementById("camCancel").addEventListener("click", closeCamera);
+// "Scan now" just forces an immediate attempt outside the regular cadence — continuous scanning already runs on its own.
+document.getElementById("camCapture").addEventListener("click", ()=>{
+  clearTimeout(scanTimer);
+  scanLoopStep();
 });
 
 /* ---------- Boot ---------- */
