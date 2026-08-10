@@ -239,7 +239,7 @@
   }
   .cam-frame{position:relative;width:100%;max-width:420px;}
   .cam-guide{
-    position:absolute;left:15%;right:15%;top:40%;bottom:40%;
+    position:absolute;left:8%;right:8%;top:35%;bottom:35%;
     border:2px dashed rgba(198,255,51,.8);
     border-radius:10px;pointer-events:none;
   }
@@ -322,7 +322,7 @@
     <video id="camVideo" playsinline autoplay muted></video>
     <div class="cam-guide"></div>
   </div>
-  <div class="cam-status" id="camStatus">Align the sort code inside the box — scanning…</div>
+  <div class="cam-status" id="camStatus">Fill the box with just the code — hold steady, close up</div>
   <div class="cam-actions">
     <button class="cancel" id="camCancel">Cancel</button>
     <button class="capture" id="camCapture">Scan now</button>
@@ -673,8 +673,7 @@ let tessWorker = null;
 let tessReady = false;
 let scanning = false;
 let scanTimer = null;
-let lastCandidate = "";
-let candidateStreak = 0;
+let matchHistory = [];
 const SCAN_INTERVAL_MS = 250; // gap between OCR attempts while nothing found
 
 async function ensureWorker(){
@@ -723,16 +722,24 @@ function captureCropToCanvas(){
   const sy = (guideBox.top - frameBox.top) * scaleY;
   const sw = guideBox.width * scaleX;
   const sh = guideBox.height * scaleY;
-  camCanvas.width = sw; camCanvas.height = sh;
+
+  // Upscale the crop — OCR is far more reliable on larger text. Target a
+  // minimum height so small/thin crops don't starve Tesseract of detail.
+  const UPSCALE_TARGET_H = 220;
+  const scale = Math.max(1, UPSCALE_TARGET_H / sh);
+  camCanvas.width = sw * scale;
+  camCanvas.height = sh * scale;
   const ctx = camCanvas.getContext("2d");
-  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, camCanvas.width, camCanvas.height);
   enhanceCanvas(camCanvas);
 }
 
 async function openCamera(){
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
-  lastCandidate = ""; candidateStreak = 0;
+  matchHistory = [];
   try{
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
@@ -771,30 +778,28 @@ async function scanLoopStep(){
     const candidate = normalizeCode(data.text || "");
     if(!scanning) return; // camera may have been cancelled mid-recognize
 
-    if(candidate.length >= 3){
+    if(candidate.length >= 2){
       camStatus.textContent = `Scanning… last read: ${candidate}`;
       const match = findCodeMatch(candidate);
       if(match.status === "exact"){
         acceptScan(candidate);
         return;
       } else if(match.status === "canonical" || match.status === "fuzzy"){
-        // require the same near-match twice in a row before auto-accepting,
-        // so a single noisy OCR read can't place a bag at the wrong location
-        if(candidate === lastCandidate){
-          candidateStreak++;
-        } else {
-          lastCandidate = candidate;
-          candidateStreak = 1;
-        }
-        if(candidateStreak >= 2){
-          acceptScan(match.matchedCode);
+        // Rolling vote: keep the last few near-matches and accept once the
+        // same underlying code has come up twice — this tolerates a noisy
+        // frame here and there without ever accepting on a single fluke read.
+        matchHistory.push(match.matchedCode);
+        if(matchHistory.length > 4) matchHistory.shift();
+        const counts = {};
+        for(const c of matchHistory) counts[c] = (counts[c]||0) + 1;
+        const winner = Object.keys(counts).find(c => counts[c] >= 2);
+        if(winner){
+          acceptScan(winner);
           return;
         }
-      } else {
-        lastCandidate = ""; candidateStreak = 0;
       }
     } else {
-      camStatus.textContent = "Align the sort code inside the box — scanning…";
+      camStatus.textContent = "Fill the box with just the code — hold steady, close up";
     }
   }catch(err){
     console.error(err);
