@@ -365,34 +365,26 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 /* ======================= CONFIG =======================
-   TWO Google Sheets:
+   ONE Google Sheet — your daily DSP export, with one extra column added
+   at the end: "Staging Code" (filled in for Block-A rows).
 
-   1) ASSIGNMENT sheet — bulk-pasted daily DSP export. Needs at least these
-      headers (any extra columns are ignored):
-        seller_name | Sort code | Service type | dsp_latest_runsheet_id
-      (awb_number optional, shown if present)
+   Needs at least these headers (any extra columns are ignored):
+     seller_name | Sort code | Service type | dsp_latest_runsheet_id | Staging Code
+   (awb_number optional, shown if present)
 
-   2) STAGING MAP sheet — you maintain this. Needs headers:
-        Sort Code | Staging Code
-      Only needs rows for Block-A sort codes for now.
-
-   Both sheets must be shared "Anyone with the link — Viewer".
+   Sheet must be shared "Anyone with the link — Viewer".
 ========================================================= */
 const ASSIGNMENT_SHEET_ID = "PUT_ASSIGNMENT_SHEET_ID_HERE";
 const ASSIGNMENT_TAB      = "Assignment";
 
-const STAGING_SHEET_ID = "PUT_STAGING_SHEET_ID_HERE";
-const STAGING_TAB      = "StagingMap";
-
-const REFRESH_MS = 30000; // re-pull both sheets every 30s
+const REFRESH_MS = 30000; // re-pull the sheet every 30s
 /* ======================================================= */
 
 const assignmentUrl = `https://docs.google.com/spreadsheets/d/${ASSIGNMENT_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(ASSIGNMENT_TAB)}`;
-const stagingUrl    = `https://docs.google.com/spreadsheets/d/${STAGING_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(STAGING_TAB)}`;
 
-let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, serviceType, runsheetId}]
+let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, serviceType, runsheetId, stagingCode}]
 let RUNSHEET_INDEX = new Map();  // normalized runsheetId -> row
-let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode
+let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode (built from the Staging Code column)
 let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller) [Block-A only]
 let BLOCKA_SELLER_LIST = [];     // unique seller names, Block-A only
 let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode) [Block-A only]
@@ -445,52 +437,34 @@ function isBlockA(serviceType){
 async function pullSheets(){
   setSyncState("loading");
   try{
-    const [assignRes, stageRes] = await Promise.all([
-      fetch(assignmentUrl, {cache:"no-store"}),
-      fetch(stagingUrl, {cache:"no-store"})
-    ]);
-    if(!assignRes.ok) throw new Error("Assignment sheet: HTTP " + assignRes.status);
-    if(!stageRes.ok) throw new Error("Staging sheet: HTTP " + stageRes.status);
-    const [assignText, stageText] = await Promise.all([assignRes.text(), stageRes.text()]);
+    const res = await fetch(assignmentUrl, {cache:"no-store"});
+    if(!res.ok) throw new Error("Assignment sheet: HTTP " + res.status);
+    const text = await res.text();
 
-    // --- Assignment sheet ---
-    const aTable = parseCSV(assignText);
-    if(!aTable.length) throw new Error("Assignment sheet is empty");
-    const aHeader = aTable[0];
-    const sellerCol   = findCol(aHeader, ["seller_name","Seller Name","Seller"]);
-    const sortCol     = findCol(aHeader, ["Sort code","sort_code","SortCode"]);
-    const serviceCol  = findCol(aHeader, ["Service type","service_type","ServiceType"]);
-    const runsheetCol = findCol(aHeader, ["dsp_latest_runsheet_id","Runsheet ID","runsheet_id","RunsheetId"]);
-    const awbCol      = findCol(aHeader, ["awb_number","AWB","awb"]);
+    const table = parseCSV(text);
+    if(!table.length) throw new Error("Assignment sheet is empty");
+    const header = table[0];
+    const sellerCol   = findCol(header, ["seller_name","Seller Name","Seller"]);
+    const sortCol     = findCol(header, ["Sort code","sort_code","SortCode"]);
+    const serviceCol  = findCol(header, ["Service type","service_type","ServiceType"]);
+    const runsheetCol = findCol(header, ["dsp_latest_runsheet_id","Runsheet ID","runsheet_id","RunsheetId"]);
+    const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
+    const stagingCol  = findCol(header, ["Staging Code","StagingCode","Staging"]);
     if(sellerCol === -1 || sortCol === -1 || serviceCol === -1){
       throw new Error("Assignment sheet missing seller_name / Sort code / Service type columns");
     }
-    const rows = aTable.slice(1).map(r => ({
+    const rows = table.slice(1).map(r => ({
       awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
       seller: (r[sellerCol]||"").trim(),
       sortCode: (r[sortCol]||"").trim(),
       serviceType: (r[serviceCol]||"").trim(),
-      runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : ""
+      runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
+      stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : ""
     })).filter(r => r.sortCode || r.seller);
-
-    // --- Staging map sheet ---
-    const sTable = parseCSV(stageText);
-    if(!sTable.length) throw new Error("Staging map sheet is empty");
-    const sHeader = sTable[0];
-    const sSortCol    = findCol(sHeader, ["Sort Code","Sort code","SortCode"]);
-    const sStageCol   = findCol(sHeader, ["Staging Code","StagingCode","Staging"]);
-    if(sSortCol === -1 || sStageCol === -1){
-      throw new Error("Staging map sheet missing Sort Code / Staging Code columns");
-    }
-    const stagingIndex = new Map();
-    for(const r of sTable.slice(1)){
-      const code = normalizeCode(r[sSortCol]);
-      const stage = (r[sStageCol]||"").trim();
-      if(code && stage) stagingIndex.set(code, stage);
-    }
 
     // --- Build derived indices ---
     const runsheetIndex = new Map();
+    const stagingIndex = new Map();
     const sortCodeSellers = new Map();
     const sellerSortCodes = new Map();
     const blockASellersSet = new Set();
@@ -498,6 +472,10 @@ async function pullSheets(){
     for(const row of rows){
       if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
         runsheetIndex.set(row.runsheetId, row);
+      }
+      if(row.sortCode && row.stagingCode){
+        const key = normalizeCode(row.sortCode);
+        if(!stagingIndex.has(key)) stagingIndex.set(key, row.stagingCode);
       }
       if(isBlockA(row.serviceType) && row.sortCode){
         const key = normalizeCode(row.sortCode);
