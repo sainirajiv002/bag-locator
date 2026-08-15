@@ -19,6 +19,7 @@
     --neon-dim:#8fb824;
     --amber:#ffb020;
     --red:#ff5d5d;
+    --blue:#5db2ff;
     --tag-hole:#0e1012;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
@@ -102,6 +103,28 @@
     text-transform:uppercase;letter-spacing:.08em;margin:0 2px 8px;
   }
 
+  .big-scan-btn{
+    width:100%;
+    background:var(--neon);
+    color:#101210;
+    border:0;
+    border-radius:16px;
+    padding:18px;
+    display:flex;align-items:center;justify-content:center;gap:10px;
+    font-family:inherit;font-weight:700;font-size:16px;
+    cursor:pointer;
+  }
+  .big-scan-btn svg{width:22px;height:22px;}
+  .big-scan-btn:active{background:var(--neon-dim);}
+
+  .divider{
+    display:flex;align-items:center;gap:10px;
+    margin:22px 0 16px;
+    color:var(--muted);font-size:11.5px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.06em;
+  }
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line);}
+
   .input-row{display:flex;gap:8px;}
   .code-input{
     flex:1;
@@ -131,18 +154,6 @@
   }
   .cam-btn svg{width:24px;height:24px;color:var(--neon);}
   .cam-btn:active{background:var(--surface);}
-
-  .go-btn{
-    margin-top:10px;
-    width:100%;
-    background:var(--neon);
-    color:#101210;
-    border:0;
-    font-family:inherit;font-weight:700;font-size:15px;
-    padding:15px;border-radius:14px;cursor:pointer;
-  }
-  .go-btn:active{background:var(--neon-dim);}
-  .go-btn:disabled{opacity:.4;}
 
   .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;}
 
@@ -177,6 +188,7 @@
   }
   .status-note.warn{border-color:#5a4a1a;color:var(--amber);}
   .status-note.err{border-color:#5a2323;color:var(--red);}
+  .status-note.info{border-color:#1e3a52;color:var(--blue);}
 
   /* Signature: the tag card, echoing the physical neon PRN tag */
   .tag{
@@ -207,7 +219,7 @@
     word-break:break-word;
   }
   .tag .meta{
-    display:flex;justify-content:space-between;align-items:flex-end;gap:10px;
+    display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px;
     border-top:1.5px dashed rgba(16,18,16,.3);
     padding-top:10px;
     font-family:'IBM Plex Mono',monospace;
@@ -224,7 +236,7 @@
   .tag.dim::before{background:var(--bg);}
   .tag.dim .meta{border-top-color:var(--line);}
 
-  /* Camera modal */
+  /* Camera / scan modal (shared by barcode + OCR sort-code modes) */
   .cam-modal{
     position:fixed;inset:0;background:rgba(6,7,8,.92);
     display:none;align-items:center;justify-content:center;
@@ -239,8 +251,8 @@
   }
   .cam-frame{position:relative;width:100%;max-width:420px;}
   .cam-guide{
-    position:absolute;left:6%;right:6%;top:15%;bottom:15%;
-    border:2px dashed rgba(198,255,51,.55);
+    position:absolute;left:10%;right:10%;top:38%;bottom:38%;
+    border:2px dashed rgba(198,255,51,.7);
     border-radius:10px;pointer-events:none;
   }
   .cam-status{color:var(--muted);font-size:13px;margin:14px 0;text-align:center;min-height:18px;}
@@ -268,7 +280,7 @@
     <div class="brand-mark">B</div>
     <div>
       <h1>Bag Locator</h1>
-      <p>NCR Bamnoli DC · RTS pendency</p>
+      <p>NCR Bamnoli DC · Block-A staging</p>
     </div>
   </div>
   <div class="sync stale" id="syncPill" title="Tap to refresh now">
@@ -287,15 +299,22 @@
 
   <!-- SORTER PANEL -->
   <section id="panelSort" class="panel active">
+    <button class="big-scan-btn" id="openBarcodeScan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="2" height="12"/><rect x="6" y="6" width="1" height="12"/><rect x="9" y="6" width="2" height="12"/><rect x="13" y="6" width="1" height="12"/><rect x="16" y="6" width="2" height="12"/><rect x="20" y="6" width="2" height="12"/></svg>
+      Scan Barcode
+    </button>
+    <p class="hint">Scans the runsheet barcode on the tag instantly — no typing needed. Works with a handheld scanner too (just click into the page and scan).</p>
+
+    <div class="divider">No barcode yet? Use sort code</div>
+
     <label class="field-label" for="codeInput">Sort code</label>
     <div class="input-row">
       <input id="codeInput" class="code-input" placeholder="e.g. 7A28" autocomplete="off" autocapitalize="characters" maxlength="12" inputmode="text">
-      <div class="cam-btn" id="openCam" title="Scan with camera">
+      <div class="cam-btn" id="openCam" title="Scan with camera (OCR)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       </div>
     </div>
-    <button class="go-btn" id="lookupBtn">Find placement location</button>
-    <p class="hint">Scan with the handheld scanner, use the camera, or type the code — the location shows instantly, no need to press anything.</p>
+    <p class="hint">Fallback for bags without a barcode yet — scan, type, or read it off the tag. Shows instantly, no need to press anything.</p>
 
     <div class="results" id="sortResults"></div>
   </section>
@@ -307,7 +326,7 @@
       <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller name…" autocomplete="off">
       <div class="ac-list" id="acList"></div>
     </div>
-    <p class="hint">Pick your seller from the list to see where the bag was placed.</p>
+    <p class="hint">Pick your seller to see the staging code(s) for their Block-A bags.</p>
 
     <div class="results" id="findResults"></div>
   </section>
@@ -316,7 +335,18 @@
 
 <footer>Data synced from Google Sheets · read-only lookup</footer>
 
-<!-- Camera / OCR modal -->
+<!-- Barcode scan modal (real barcode decode via ZXing) -->
+<div class="cam-modal" id="barcodeModal">
+  <div class="cam-frame">
+    <video id="barcodeVideo" playsinline autoplay muted></video>
+  </div>
+  <div class="cam-status" id="barcodeStatus">Starting camera…</div>
+  <div class="cam-actions">
+    <button class="cancel" id="barcodeCancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Sort-code OCR scan modal (fallback) -->
 <div class="cam-modal" id="camModal">
   <div class="cam-frame">
     <video id="camVideo" playsinline autoplay muted></video>
@@ -331,24 +361,43 @@
 
 <canvas id="camCanvas" style="display:none;"></canvas>
 
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
-/* ======================= CONFIG ======================= */
-// 1. Create a Google Sheet with headers exactly: Seller Name | Sort Code | Placement Location
-// 2. File > Share > "Anyone with the link" set to Viewer
-// 3. Paste the Sheet ID below (the long id in the sheet's URL between /d/ and /edit)
-// 4. Set SHEET_TAB to the exact name of the tab/worksheet holding the data (bottom tab label)
-const SHEET_ID  = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
-const SHEET_TAB = "Sheet1";
-const REFRESH_MS = 30000; // re-pull the sheet every 30s
+/* ======================= CONFIG =======================
+   TWO Google Sheets:
+
+   1) ASSIGNMENT sheet — bulk-pasted daily DSP export. Needs at least these
+      headers (any extra columns are ignored):
+        seller_name | Sort code | Service type | dsp_latest_runsheet_id
+      (awb_number optional, shown if present)
+
+   2) STAGING MAP sheet — you maintain this. Needs headers:
+        Sort Code | Staging Code
+      Only needs rows for Block-A sort codes for now.
+
+   Both sheets must be shared "Anyone with the link — Viewer".
+========================================================= */
+const ASSIGNMENT_SHEET_ID = "PUT_ASSIGNMENT_SHEET_ID_HERE";
+const ASSIGNMENT_TAB      = "Assignment";
+
+const STAGING_SHEET_ID = "PUT_STAGING_SHEET_ID_HERE";
+const STAGING_TAB      = "StagingMap";
+
+const REFRESH_MS = 30000; // re-pull both sheets every 30s
 /* ======================================================= */
 
-const dataUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_TAB)}`;
+const assignmentUrl = `https://docs.google.com/spreadsheets/d/${ASSIGNMENT_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(ASSIGNMENT_TAB)}`;
+const stagingUrl    = `https://docs.google.com/spreadsheets/d/${STAGING_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(STAGING_TAB)}`;
 
-let ROWS = [];          // [{seller, code, location}]
-let CODE_INDEX = new Map(); // normalized code -> row
+let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, serviceType, runsheetId}]
+let RUNSHEET_INDEX = new Map();  // normalized runsheetId -> row
+let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode
+let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller) [Block-A only]
+let BLOCKA_SELLER_LIST = [];     // unique seller names, Block-A only
+let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode) [Block-A only]
+
 let lastSync = null;
-let syncTimer = null;
 
 /* ---------- CSV parsing (handles quoted commas) ---------- */
 function parseCSV(text){
@@ -383,33 +432,94 @@ function findCol(header, names){
   return -1;
 }
 
-async function pullSheet(){
+function normalizeCode(raw){
+  return (raw||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+}
+function normalizeRunsheetId(raw){
+  return (raw||"").toString().trim().replace(/\.0+$/,"").replace(/[^0-9]/g,"");
+}
+function isBlockA(serviceType){
+  return (serviceType||"").trim().toLowerCase() === "block-a";
+}
+
+async function pullSheets(){
   setSyncState("loading");
   try{
-    const res = await fetch(dataUrl, {cache:"no-store"});
-    if(!res.ok) throw new Error("HTTP " + res.status);
-    const text = await res.text();
-    const table = parseCSV(text);
-    if(!table.length) throw new Error("Empty sheet");
-    const header = table[0];
-    const sellerCol = findCol(header, ["Seller Name","Seller"]);
-    const codeCol   = findCol(header, ["Sort Code","SortCode","Code"]);
-    const locCol    = findCol(header, ["Placement Location","Location"]);
-    if(sellerCol === -1 || codeCol === -1 || locCol === -1){
-      throw new Error("Header columns not found — expected Seller Name / Sort Code / Placement Location");
-    }
-    const rows = table.slice(1).map(r => ({
-      seller: (r[sellerCol]||"").trim(),
-      code: (r[codeCol]||"").trim(),
-      location: (r[locCol]||"").trim()
-    })).filter(r => r.code || r.seller);
+    const [assignRes, stageRes] = await Promise.all([
+      fetch(assignmentUrl, {cache:"no-store"}),
+      fetch(stagingUrl, {cache:"no-store"})
+    ]);
+    if(!assignRes.ok) throw new Error("Assignment sheet: HTTP " + assignRes.status);
+    if(!stageRes.ok) throw new Error("Staging sheet: HTTP " + stageRes.status);
+    const [assignText, stageText] = await Promise.all([assignRes.text(), stageRes.text()]);
 
-    ROWS = rows;
-    CODE_INDEX = new Map();
-    for(const r of rows){
-      const key = normalizeCode(r.code);
-      if(key) CODE_INDEX.set(key, r);
+    // --- Assignment sheet ---
+    const aTable = parseCSV(assignText);
+    if(!aTable.length) throw new Error("Assignment sheet is empty");
+    const aHeader = aTable[0];
+    const sellerCol   = findCol(aHeader, ["seller_name","Seller Name","Seller"]);
+    const sortCol     = findCol(aHeader, ["Sort code","sort_code","SortCode"]);
+    const serviceCol  = findCol(aHeader, ["Service type","service_type","ServiceType"]);
+    const runsheetCol = findCol(aHeader, ["dsp_latest_runsheet_id","Runsheet ID","runsheet_id","RunsheetId"]);
+    const awbCol      = findCol(aHeader, ["awb_number","AWB","awb"]);
+    if(sellerCol === -1 || sortCol === -1 || serviceCol === -1){
+      throw new Error("Assignment sheet missing seller_name / Sort code / Service type columns");
     }
+    const rows = aTable.slice(1).map(r => ({
+      awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
+      seller: (r[sellerCol]||"").trim(),
+      sortCode: (r[sortCol]||"").trim(),
+      serviceType: (r[serviceCol]||"").trim(),
+      runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : ""
+    })).filter(r => r.sortCode || r.seller);
+
+    // --- Staging map sheet ---
+    const sTable = parseCSV(stageText);
+    if(!sTable.length) throw new Error("Staging map sheet is empty");
+    const sHeader = sTable[0];
+    const sSortCol    = findCol(sHeader, ["Sort Code","Sort code","SortCode"]);
+    const sStageCol   = findCol(sHeader, ["Staging Code","StagingCode","Staging"]);
+    if(sSortCol === -1 || sStageCol === -1){
+      throw new Error("Staging map sheet missing Sort Code / Staging Code columns");
+    }
+    const stagingIndex = new Map();
+    for(const r of sTable.slice(1)){
+      const code = normalizeCode(r[sSortCol]);
+      const stage = (r[sStageCol]||"").trim();
+      if(code && stage) stagingIndex.set(code, stage);
+    }
+
+    // --- Build derived indices ---
+    const runsheetIndex = new Map();
+    const sortCodeSellers = new Map();
+    const sellerSortCodes = new Map();
+    const blockASellersSet = new Set();
+
+    for(const row of rows){
+      if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
+        runsheetIndex.set(row.runsheetId, row);
+      }
+      if(isBlockA(row.serviceType) && row.sortCode){
+        const key = normalizeCode(row.sortCode);
+        if(!sortCodeSellers.has(key)) sortCodeSellers.set(key, new Set());
+        if(row.seller) sortCodeSellers.get(key).add(row.seller);
+
+        if(row.seller){
+          blockASellersSet.add(row.seller);
+          const sellerKey = row.seller.toLowerCase();
+          if(!sellerSortCodes.has(sellerKey)) sellerSortCodes.set(sellerKey, new Set());
+          sellerSortCodes.get(sellerKey).add(key);
+        }
+      }
+    }
+
+    ASSIGNMENT_ROWS = rows;
+    RUNSHEET_INDEX = runsheetIndex;
+    STAGING_INDEX = stagingIndex;
+    SORTCODE_SELLERS = sortCodeSellers;
+    SELLER_SORTCODES = sellerSortCodes;
+    BLOCKA_SELLER_LIST = [...blockASellersSet].sort();
+
     lastSync = new Date();
     setSyncState("ok");
   }catch(err){
@@ -444,16 +554,10 @@ function tickSyncLabel(){
   else txt.textContent = `Synced ${Math.round(secs/60)}m ago`;
 }
 setInterval(tickSyncLabel, 1000);
+document.getElementById("syncPill").addEventListener("click", pullSheets);
 
-document.getElementById("syncPill").addEventListener("click", pullSheet);
-
-/* ---------- Fuzzy matching for hazy scans ---------- */
-// Canonicalize commonly-confused OCR / handwriting characters so
-// visually-similar codes compare as equal before falling back to edit distance.
+/* ---------- Fuzzy matching for the sort-code fallback ---------- */
 const CONFUSABLE_MAP = { "O":"0","Q":"0","D":"0","I":"1","L":"1","Z":"2","S":"5","B":"8","G":"6","T":"7" };
-function normalizeCode(raw){
-  return (raw||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-}
 function canonicalize(code){
   return normalizeCode(code).split("").map(ch => CONFUSABLE_MAP[ch] || ch).join("");
 }
@@ -468,43 +572,36 @@ function levenshtein(a,b){
   }
   return dp[m][n];
 }
-
-function findCodeMatch(rawInput){
+// Matches a raw candidate against a Set of normalized keys (used for the
+// sort-code fallback, matching against STAGING_INDEX's keys).
+function matchCode(rawInput, keySet){
   const key = normalizeCode(rawInput);
   if(!key) return {status:"empty"};
+  if(keySet.has(key)) return {status:"exact", matchedKey:key};
 
-  // 1. exact match
-  if(CODE_INDEX.has(key)){
-    return {status:"exact", row: CODE_INDEX.get(key)};
-  }
-
-  // Reject candidates whose length is way off from any real code — a 2-char
-  // OCR fragment like "SL" or "BJ" should never be allowed to "fuzzy match"
-  // a 4-char code just because edit distance tolerates padding it out.
-  const codeLengths = new Set([...CODE_INDEX.keys()].map(c => c.length));
-  const closeEnoughLength = [...codeLengths].some(len => Math.abs(len - key.length) <= 1);
+  const lengths = new Set([...keySet].map(k => k.length));
+  const closeEnoughLength = [...lengths].some(len => Math.abs(len - key.length) <= 1);
   if(!closeEnoughLength) return {status:"notfound"};
 
-  // 2. canonicalized (confusable-normalized) exact match
   const canonInput = canonicalize(key);
-  for(const [code, row] of CODE_INDEX){
-    if(code.length === key.length && canonicalize(code) === canonInput){
-      return {status:"canonical", row, matchedCode: code};
+  for(const k of keySet){
+    if(k.length === key.length && canonicalize(k) === canonInput){
+      return {status:"canonical", matchedKey:k};
     }
   }
-
-  // 3. nearest by edit distance (on canonicalized strings) — only among
-  // codes whose length is within 1 of the candidate's length
   let best = null, bestDist = Infinity;
-  for(const [code, row] of CODE_INDEX){
-    if(Math.abs(code.length - key.length) > 1) continue;
-    const d = levenshtein(canonInput, canonicalize(code));
-    if(d < bestDist){ best = {row, code, d}; bestDist = d; }
+  for(const k of keySet){
+    if(Math.abs(k.length - key.length) > 1) continue;
+    const d = levenshtein(canonInput, canonicalize(k));
+    if(d < bestDist){ best = k; bestDist = d; }
   }
-  if(best && bestDist <= 2){
-    return {status:"fuzzy", row: best.row, matchedCode: best.code, distance: bestDist};
-  }
+  if(best && bestDist <= 2) return {status:"fuzzy", matchedKey:best, distance:bestDist};
   return {status:"notfound"};
+}
+function minKeyLength(keySet){
+  let min = Infinity;
+  for(const k of keySet) if(k.length < min) min = k.length;
+  return Number.isFinite(min) ? min : 4;
 }
 
 /* ---------- Tabs ---------- */
@@ -515,7 +612,6 @@ const panelFind = document.getElementById("panelFind");
 tabSort.addEventListener("click", ()=>{
   tabSort.classList.add("active"); tabFind.classList.remove("active");
   panelSort.classList.add("active"); panelFind.classList.remove("active");
-  document.getElementById("codeInput").focus();
 });
 tabFind.addEventListener("click", ()=>{
   tabFind.classList.add("active"); tabSort.classList.remove("active");
@@ -523,90 +619,127 @@ tabFind.addEventListener("click", ()=>{
   document.getElementById("sellerInput").focus();
 });
 
-/* ---------- Sorter flow ---------- */
-const codeInput = document.getElementById("codeInput");
-const sortResults = document.getElementById("sortResults");
+/* ---------- Shared result rendering ---------- */
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 
-function renderSortResult(input){
-  const match = findCodeMatch(input);
-  sortResults.innerHTML = "";
-
-  if(match.status === "empty") return;
-
-  if(match.status === "notfound"){
-    sortResults.innerHTML = `<div class="status-note err">No location found for "<b>${escapeHtml(input.toUpperCase())}</b>". Double-check the code on the tag, or check with your supervisor — it may not be in today's sheet yet.</div>`;
-    return;
-  }
-
-  const row = match.row;
-  let noteHtml = "";
-  if(match.status === "canonical" || match.status === "fuzzy"){
-    noteHtml = `<div class="match-note">Closest match to "${escapeHtml(input.toUpperCase())}" → using code ${escapeHtml(match.matchedCode)}. Confirm the seller name below matches the tag.</div>`;
-  }
-
-  sortResults.innerHTML = `
-    <div class="tag">
-      <div class="eyebrow">Place this bag at</div>
-      <div class="loc">${escapeHtml(row.location || "—")}</div>
+function tagCard({eyebrow, big, metaLeft, metaRight, note, dim}){
+  return `
+    <div class="tag${dim ? " dim" : ""}">
+      <div class="eyebrow">${escapeHtml(eyebrow)}</div>
+      <div class="loc">${escapeHtml(big)}</div>
       <div class="meta">
-        <div><span class="k">Sort code</span><span class="v">${escapeHtml(row.code)}</span></div>
-        <div><span class="k">Seller</span><span class="v">${escapeHtml(row.seller || "—")}</span></div>
+        <div><span class="k">${escapeHtml(metaLeft.k)}</span><span class="v">${escapeHtml(metaLeft.v)}</span></div>
+        <div><span class="k">${escapeHtml(metaRight.k)}</span><span class="v">${escapeHtml(metaRight.v)}</span></div>
       </div>
-      ${noteHtml}
+      ${note ? `<div class="match-note">${escapeHtml(note)}</div>` : ""}
     </div>`;
 }
 
-document.getElementById("lookupBtn").addEventListener("click", ()=> renderSortResult(codeInput.value));
-codeInput.addEventListener("keydown", (e)=>{
-  if(e.key === "Enter"){ e.preventDefault(); renderSortResult(codeInput.value); }
-});
+/* ---------- Sorter: barcode path (via runsheet ID) ---------- */
+const sortResults = document.getElementById("sortResults");
 
-// Instant lookup: fires automatically once the typed/scanned text reaches the
-// sheet's known code length — no need to press Enter or the button. Covers
-// both manual typing and physical keyboard-wedge scanners (which type fast + Enter).
+function handleBarcodeResult(rawText){
+  const runsheetId = normalizeRunsheetId(rawText);
+  sortResults.innerHTML = "";
+
+  if(!runsheetId){
+    sortResults.innerHTML = `<div class="status-note err">Barcode read as "${escapeHtml(rawText)}" — doesn't look like a runsheet ID. Try again or use the sort code fallback.</div>`;
+    return;
+  }
+  const row = RUNSHEET_INDEX.get(runsheetId);
+  if(!row){
+    sortResults.innerHTML = `<div class="status-note err">Runsheet ${escapeHtml(runsheetId)} isn't in today's assignment sheet yet. Check with your supervisor, or use the sort code fallback below.</div>`;
+    return;
+  }
+
+  if(!isBlockA(row.serviceType)){
+    sortResults.innerHTML = tagCard({
+      eyebrow: "Service type",
+      big: row.serviceType || "—",
+      metaLeft: {k:"Sort code", v: row.sortCode || "—"},
+      metaRight: {k:"Seller", v: row.seller || "—"},
+      note: "Staging not required for this service type yet.",
+      dim: true
+    });
+    return;
+  }
+
+  const staging = STAGING_INDEX.get(normalizeCode(row.sortCode));
+  if(!staging){
+    sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (Block-A, seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet — check with your supervisor.</div>`;
+    return;
+  }
+
+  sortResults.innerHTML = tagCard({
+    eyebrow: "Stage this bag at",
+    big: staging,
+    metaLeft: {k:"Sort code", v: row.sortCode},
+    metaRight: {k:"Seller", v: row.seller || "—"}
+  });
+}
+
+/* ---------- Sorter: sort-code fallback path ---------- */
+const codeInput = document.getElementById("codeInput");
+
+function renderSortCodeFallback(input){
+  const keys = new Set(STAGING_INDEX.keys());
+  const match = matchCode(input, keys);
+  sortResults.innerHTML = "";
+  if(match.status === "empty") return;
+
+  if(match.status === "notfound"){
+    sortResults.innerHTML = `<div class="status-note err">No staging code found for "${escapeHtml(input.toUpperCase())}". Double-check the code on the tag, or check with your supervisor.</div>`;
+    return;
+  }
+
+  const stageCode = STAGING_INDEX.get(match.matchedKey);
+  const sellers = [...(SORTCODE_SELLERS.get(match.matchedKey) || [])];
+  const sellerText = sellers.length === 0 ? "—" : sellers.length === 1 ? sellers[0] : `${sellers.length} sellers use this code`;
+
+  let note = "";
+  if(match.status === "canonical" || match.status === "fuzzy"){
+    note = `Closest match to "${escapeHtml(input.toUpperCase())}" → using ${escapeHtml(match.matchedKey)}. Confirm against the tag.`;
+  }
+
+  sortResults.innerHTML = tagCard({
+    eyebrow: "Stage this bag at",
+    big: stageCode,
+    metaLeft: {k:"Sort code", v: match.matchedKey},
+    metaRight: {k:"Seller", v: sellerText},
+    note
+  });
+}
+
 let typeTimer = null;
 codeInput.addEventListener("input", ()=>{
   clearTimeout(typeTimer);
   const val = normalizeCode(codeInput.value);
   if(!val){ sortResults.innerHTML = ""; return; }
-  if(val.length >= minCodeLength()){
-    typeTimer = setTimeout(()=> renderSortResult(codeInput.value), 80);
+  if(val.length >= minKeyLength(new Set(STAGING_INDEX.keys()))){
+    typeTimer = setTimeout(()=> renderSortCodeFallback(codeInput.value), 80);
   }
 });
-function minCodeLength(){
-  let min = Infinity;
-  for(const code of CODE_INDEX.keys()) if(code.length < min) min = code.length;
-  return Number.isFinite(min) ? min : 4;
-}
-
+codeInput.addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){ e.preventDefault(); renderSortCodeFallback(codeInput.value); }
+});
 codeInput.addEventListener("focus", ()=> codeInput.select());
 
-/* ---------- Rider flow ---------- */
+/* ---------- Rider: seller search (Block-A only) ---------- */
 const sellerInput = document.getElementById("sellerInput");
 const acList = document.getElementById("acList");
 const findResults = document.getElementById("findResults");
 let hiIndex = -1;
 let currentOptions = [];
 
-function uniqueSellers(){
-  const seen = new Set(), out=[];
-  for(const r of ROWS){
-    if(r.seller && !seen.has(r.seller.toLowerCase())){
-      seen.add(r.seller.toLowerCase());
-      out.push(r.seller);
-    }
-  }
-  return out;
-}
-
 function renderAutocomplete(q){
   const query = q.trim().toLowerCase();
   hiIndex = -1;
   if(!query){ acList.classList.remove("open"); acList.innerHTML=""; return; }
-  const all = uniqueSellers();
-  currentOptions = all.filter(s => s.toLowerCase().includes(query)).slice(0,30);
+  currentOptions = BLOCKA_SELLER_LIST.filter(s => s.toLowerCase().includes(query)).slice(0,30);
   if(!currentOptions.length){
-    acList.innerHTML = `<div class="ac-empty">No sellers match "${escapeHtml(q)}"</div>`;
+    acList.innerHTML = `<div class="ac-empty">No Block-A sellers match "${escapeHtml(q)}"</div>`;
     acList.classList.add("open");
     return;
   }
@@ -648,31 +781,76 @@ function highlight(items){
 function selectSeller(name){
   sellerInput.value = name;
   acList.classList.remove("open");
-  const matches = ROWS.filter(r => r.seller.toLowerCase() === name.toLowerCase());
-  if(!matches.length){
-    findResults.innerHTML = `<div class="status-note err">No bag found for "${escapeHtml(name)}".</div>`;
+  const codes = [...(SELLER_SORTCODES.get(name.toLowerCase()) || [])];
+  if(!codes.length){
+    findResults.innerHTML = `<div class="status-note err">No Block-A bag found for "${escapeHtml(name)}".</div>`;
     return;
   }
-  findResults.innerHTML = matches.map(r => `
-    <div class="tag">
-      <div class="eyebrow">Pick up at</div>
-      <div class="loc">${escapeHtml(r.location || "—")}</div>
-      <div class="meta">
-        <div><span class="k">Sort code</span><span class="v">${escapeHtml(r.code)}</span></div>
-        <div><span class="k">Seller</span><span class="v">${escapeHtml(r.seller)}</span></div>
-      </div>
-    </div>`).join("");
-  if(matches.length > 1){
+  findResults.innerHTML = codes.map(code => {
+    const staging = STAGING_INDEX.get(code);
+    if(!staging){
+      return `<div class="status-note warn">Sort code ${escapeHtml(code)} doesn't have a staging code yet.</div>`;
+    }
+    return tagCard({
+      eyebrow: "Pick up at",
+      big: staging,
+      metaLeft: {k:"Sort code", v: code},
+      metaRight: {k:"Seller", v: name}
+    });
+  }).join("");
+  if(codes.length > 1){
     findResults.insertAdjacentHTML("afterbegin",
-      `<div class="status-note">${matches.length} bags found for this seller — check every location.</div>`);
+      `<div class="status-note">${codes.length} bags found for this seller — check every location.</div>`);
   }
 }
 
-function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+/* ---------- Barcode scanning (real decode via ZXing — primary path) ---------- */
+const barcodeModal = document.getElementById("barcodeModal");
+const barcodeVideo = document.getElementById("barcodeVideo");
+const barcodeStatus = document.getElementById("barcodeStatus");
+let barcodeStream = null;
+let zxingReader = null;
+
+async function openBarcodeScanner(){
+  barcodeModal.classList.add("open");
+  barcodeStatus.textContent = "Starting camera…";
+  try{
+    barcodeStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
+    });
+    barcodeVideo.srcObject = barcodeStream;
+    await barcodeVideo.play();
+
+    if(typeof ZXing === "undefined"){
+      throw new Error("Barcode library failed to load — check your internet connection");
+    }
+    if(!zxingReader) zxingReader = new ZXing.BrowserMultiFormatReader();
+    barcodeStatus.textContent = "Point at the barcode — scanning…";
+    zxingReader.decodeFromVideoElement(barcodeVideo, (result, err) => {
+      if(result){
+        const text = result.getText();
+        closeBarcodeScanner();
+        tabSort.click();
+        handleBarcodeResult(text);
+      }
+      // err fires every frame nothing is found (NotFoundException) — ignore it
+    });
+  }catch(err){
+    console.error(err);
+    barcodeStatus.textContent = "Couldn't start: " + err.message + " — use the sort code fallback instead.";
+  }
 }
 
-/* ---------- Camera + OCR scanning (continuous, auto-accept) ---------- */
+function closeBarcodeScanner(){
+  if(zxingReader){ try{ zxingReader.reset(); }catch(e){} }
+  if(barcodeStream){ barcodeStream.getTracks().forEach(t=>t.stop()); barcodeStream = null; }
+  barcodeModal.classList.remove("open");
+}
+
+document.getElementById("openBarcodeScan").addEventListener("click", openBarcodeScanner);
+document.getElementById("barcodeCancel").addEventListener("click", closeBarcodeScanner);
+
+/* ---------- Sort-code camera OCR (fallback path) ---------- */
 const camModal = document.getElementById("camModal");
 const camVideo = document.getElementById("camVideo");
 const camCanvas = document.getElementById("camCanvas");
@@ -684,8 +862,8 @@ let scanning = false;
 let scanTimer = null;
 let matchHistory = [];
 let rotationIndex = 0;
-const ROTATIONS = [0, 90, 270, 180]; // upright and sideways tried first; upside-down last (rarest)
-const SCAN_INTERVAL_MS = 250; // gap between OCR attempts while nothing found
+const ROTATIONS = [0, 90, 270, 180];
+const SCAN_INTERVAL_MS = 250;
 
 async function ensureWorker(){
   if(tessReady) return;
@@ -696,12 +874,11 @@ async function ensureWorker(){
   tessWorker = await Tesseract.createWorker("eng");
   await tessWorker.setParameters({
     tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    tessedit_pageseg_mode: "11" // sparse text — find scattered words/labels anywhere in the frame
+    tessedit_pageseg_mode: "11"
   });
   tessReady = true;
 }
 
-// Grayscale + contrast-stretch the cropped frame so faint/glare-y prints read more reliably.
 function enhanceCanvas(canvas){
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
@@ -727,11 +904,8 @@ function enhanceCanvas(canvas){
 function captureFrameToCanvas(rotationDeg){
   const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
   if(!vw || !vh) return false;
-  // Read the whole frame, not just the guide box — precise pixel alignment
-  // to a small box is hard to hit by eye. Downscale to a sane width for
-  // speed, but keep enough resolution for the OCR engine to work with.
   const TARGET_W = 900;
-  const scale = Math.min(1.5, TARGET_W / vw); // allow slight upscale on small feeds too
+  const scale = Math.min(1.5, TARGET_W / vw);
   const dw = Math.round(vw * scale), dh = Math.round(vh * scale);
   const swapped = (rotationDeg === 90 || rotationDeg === 270);
   camCanvas.width = swapped ? dh : dw;
@@ -780,7 +954,7 @@ function acceptScan(candidate){
   clearTimeout(scanTimer);
   closeCamera();
   codeInput.value = candidate;
-  renderSortResult(candidate);
+  renderSortCodeFallback(candidate);
 }
 
 async function scanLoopStep(){
@@ -791,10 +965,8 @@ async function scanLoopStep(){
     const ok = captureFrameToCanvas(rotation);
     if(!ok){ scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS); return; }
     const { data } = await tessWorker.recognize(camCanvas);
-    if(!scanning) return; // camera may have been cancelled mid-recognize
+    if(!scanning) return;
 
-    // Pull individual words out of the frame (not just the whole blob) so a
-    // code sitting anywhere in view — not just inside the guide box — gets found.
     const words = (data.words && data.words.length ? data.words.map(w => w.text) : [data.text])
       .map(normalizeCode)
       .filter(w => w.length >= 2);
@@ -805,30 +977,25 @@ async function scanLoopStep(){
       camStatus.textContent = "Point the camera at the tag — scanning…";
     }
 
+    const keys = new Set(STAGING_INDEX.keys());
     let bestExact = null, bestNear = null, bestNearDist = Infinity;
     for(const w of words){
-      const match = findCodeMatch(w);
+      const match = matchCode(w, keys);
       if(match.status === "exact"){ bestExact = w; break; }
-      if((match.status === "canonical" || match.status === "fuzzy")){
+      if(match.status === "canonical" || match.status === "fuzzy"){
         const d = match.status === "canonical" ? 0 : match.distance;
-        if(d < bestNearDist){ bestNearDist = d; bestNear = match.matchedCode; }
+        if(d < bestNearDist){ bestNearDist = d; bestNear = match.matchedKey; }
       }
     }
 
-    if(bestExact){
-      acceptScan(bestExact);
-      return;
-    }
+    if(bestExact){ acceptScan(bestExact); return; }
     if(bestNear){
       matchHistory.push(bestNear);
       if(matchHistory.length > 4) matchHistory.shift();
       const counts = {};
       for(const c of matchHistory) counts[c] = (counts[c]||0) + 1;
       const winner = Object.keys(counts).find(c => counts[c] >= 2);
-      if(winner){
-        acceptScan(winner);
-        return;
-      }
+      if(winner){ acceptScan(winner); return; }
     }
   }catch(err){
     console.error(err);
@@ -838,15 +1005,14 @@ async function scanLoopStep(){
 
 document.getElementById("openCam").addEventListener("click", openCamera);
 document.getElementById("camCancel").addEventListener("click", closeCamera);
-// "Scan now" just forces an immediate attempt outside the regular cadence — continuous scanning already runs on its own.
 document.getElementById("camCapture").addEventListener("click", ()=>{
   clearTimeout(scanTimer);
   scanLoopStep();
 });
 
 /* ---------- Boot ---------- */
-pullSheet();
-setInterval(pullSheet, REFRESH_MS);
+pullSheets();
+setInterval(pullSheets, REFRESH_MS);
 </script>
 </body>
 </html>
