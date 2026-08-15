@@ -299,11 +299,17 @@
 
   <!-- SORTER PANEL -->
   <section id="panelSort" class="panel active">
+    <label class="field-label" for="hhdInput">Handheld scanner (HHD)</label>
+    <input id="hhdInput" class="code-input" placeholder="Click here, then scan the barcode" autocomplete="off" inputmode="text">
+    <p class="hint">Click into this field once — every scan after that submits instantly. This is the field your HHD types into.</p>
+
+    <div class="divider">No handheld scanner? Use your phone</div>
+
     <button class="big-scan-btn" id="openBarcodeScan">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="2" height="12"/><rect x="6" y="6" width="1" height="12"/><rect x="9" y="6" width="2" height="12"/><rect x="13" y="6" width="1" height="12"/><rect x="16" y="6" width="2" height="12"/><rect x="20" y="6" width="2" height="12"/></svg>
       Scan Barcode
     </button>
-    <p class="hint">Scans the runsheet barcode on the tag instantly — no typing needed. Works with a handheld scanner too (just click into the page and scan).</p>
+    <p class="hint">Scans the runsheet barcode on the tag using the phone's camera.</p>
 
     <div class="divider">No barcode yet? Use sort code</div>
 
@@ -590,6 +596,7 @@ const panelFind = document.getElementById("panelFind");
 tabSort.addEventListener("click", ()=>{
   tabSort.classList.add("active"); tabFind.classList.remove("active");
   panelSort.classList.add("active"); panelFind.classList.remove("active");
+  document.getElementById("hhdInput").focus();
 });
 tabFind.addEventListener("click", ()=>{
   tabFind.classList.add("active"); tabSort.classList.remove("active");
@@ -660,6 +667,37 @@ function handleBarcodeResult(rawText){
 
 /* ---------- Sorter: sort-code fallback path ---------- */
 const codeInput = document.getElementById("codeInput");
+
+/* ---------- HHD (handheld scanner) input — instant, no camera involved ---------- */
+const hhdInput = document.getElementById("hhdInput");
+hhdInput.addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){
+    e.preventDefault();
+    const val = hhdInput.value.trim();
+    hhdInput.value = "";
+    if(val){
+      tabSort.classList.add("active"); tabFind.classList.remove("active");
+      panelSort.classList.add("active"); panelFind.classList.remove("active");
+      handleBarcodeResult(val);
+    }
+  }
+});
+// Some HHD configurations don't send Enter — catch that case too, once the
+// scanned value is long enough to plausibly be a full runsheet ID.
+let hhdTimer = null;
+hhdInput.addEventListener("input", ()=>{
+  clearTimeout(hhdTimer);
+  const val = hhdInput.value.trim();
+  if(normalizeRunsheetId(val).length >= 8){
+    hhdTimer = setTimeout(()=>{
+      if(hhdInput.value.trim() === val && val){
+        hhdInput.value = "";
+        handleBarcodeResult(val);
+      }
+    }, 150);
+  }
+});
+
 
 function renderSortCodeFallback(input){
   const keys = new Set(STAGING_INDEX.keys());
@@ -786,25 +824,43 @@ function selectSeller(name){
 const barcodeModal = document.getElementById("barcodeModal");
 const barcodeVideo = document.getElementById("barcodeVideo");
 const barcodeStatus = document.getElementById("barcodeStatus");
-let barcodeStream = null;
 let zxingReader = null;
 
 async function openBarcodeScanner(){
   barcodeModal.classList.add("open");
   barcodeStatus.textContent = "Starting camera…";
   try{
-    barcodeStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width:{ideal:1280}, height:{ideal:720} }
-    });
-    barcodeVideo.srcObject = barcodeStream;
-    await barcodeVideo.play();
-
     if(typeof ZXing === "undefined"){
       throw new Error("Barcode library failed to load — check your internet connection");
     }
-    if(!zxingReader) zxingReader = new ZXing.BrowserMultiFormatReader();
+    if(!zxingReader){
+      // Restrict to the actual symbologies logistics barcodes use — trying
+      // every format (QR, Data Matrix, Aztec, etc.) on every frame is what
+      // was making this slow. This alone is a large speed win.
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.ITF,
+        ZXing.BarcodeFormat.EAN_13
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    }
+
+    // Prefer a rear-facing camera if we can tell from the device label.
+    let deviceId = undefined;
+    try{
+      const devices = await zxingReader.listVideoInputDevices();
+      const rear = devices.find(d => /back|rear|environment/i.test(d.label));
+      deviceId = (rear || devices[devices.length-1] || {}).deviceId;
+    }catch(e){ /* fall through with no explicit device */ }
+
     barcodeStatus.textContent = "Point at the barcode — scanning…";
-    zxingReader.decodeFromVideoElement(barcodeVideo, (result, err) => {
+    // decodeFromVideoDevice is the CONTINUOUS scanner (manages its own camera
+    // stream internally and keeps calling back until reset()) — unlike
+    // decodeFromVideoElement, which only ever decodes a single frame once.
+    zxingReader.decodeFromVideoDevice(deviceId, barcodeVideo, (result, err) => {
       if(result){
         const text = result.getText();
         closeBarcodeScanner();
@@ -821,8 +877,8 @@ async function openBarcodeScanner(){
 
 function closeBarcodeScanner(){
   if(zxingReader){ try{ zxingReader.reset(); }catch(e){} }
-  if(barcodeStream){ barcodeStream.getTracks().forEach(t=>t.stop()); barcodeStream = null; }
   barcodeModal.classList.remove("open");
+  if(panelSort.classList.contains("active")) hhdInput.focus();
 }
 
 document.getElementById("openBarcodeScan").addEventListener("click", openBarcodeScanner);
@@ -991,6 +1047,7 @@ document.getElementById("camCapture").addEventListener("click", ()=>{
 /* ---------- Boot ---------- */
 pullSheets();
 setInterval(pullSheets, REFRESH_MS);
+hhdInput.focus();
 </script>
 </body>
 </html>
