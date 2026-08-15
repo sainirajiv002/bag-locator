@@ -301,7 +301,9 @@
   <section id="panelSort" class="panel active">
     <label class="field-label" for="hhdInput">Handheld scanner (HHD)</label>
     <input id="hhdInput" class="code-input" placeholder="Click here, then scan the barcode" autocomplete="off" inputmode="text">
-    <p class="hint">Click into this field once — every scan after that submits instantly. This is the field your HHD types into.</p>
+    <p class="hint">Click into this field once — every scan after that submits instantly, whether it's the runsheet barcode or a seal code. This is the field your HHD types into.</p>
+
+    <div class="results" id="sortResults"></div>
 
     <div class="divider">No handheld scanner? Use your phone</div>
 
@@ -309,7 +311,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="2" height="12"/><rect x="6" y="6" width="1" height="12"/><rect x="9" y="6" width="2" height="12"/><rect x="13" y="6" width="1" height="12"/><rect x="16" y="6" width="2" height="12"/><rect x="20" y="6" width="2" height="12"/></svg>
       Scan Barcode
     </button>
-    <p class="hint">Scans the runsheet barcode on the tag using the phone's camera.</p>
+    <p class="hint">Scans the runsheet barcode or seal code on the tag using the phone's camera.</p>
 
     <div class="divider">No barcode yet? Use sort code</div>
 
@@ -321,8 +323,6 @@
       </div>
     </div>
     <p class="hint">Fallback for bags without a barcode yet — scan, type, or read it off the tag. Shows instantly, no need to press anything.</p>
-
-    <div class="results" id="sortResults"></div>
   </section>
 
   <!-- RIDER PANEL -->
@@ -379,7 +379,7 @@
 
    Needs at least these headers (any extra columns are ignored; header
    names are matched case-insensitively so small variations are fine):
-     seller_name | cluster_code (or "Sort code") | runsheet_id | Staging code
+     seller_name | cluster_code (or "Sort code") | runsheet_id | Staging code | Seal code
    (awb_number optional, shown if present)
 
    Sheet must be shared "Anyone with the link — Viewer".
@@ -398,6 +398,7 @@ let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode (fallback
 let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller)
 let SELLER_LIST = [];            // unique seller names (any row with a staging code)
 let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode)
+let SEAL_INDEX = new Map();      // normalized sealCode -> row
 
 let lastSync = null;
 
@@ -456,6 +457,7 @@ async function pullSheets(){
     const runsheetCol = findCol(header, ["runsheet_id","dsp_latest_runsheet_id","Runsheet ID","RunsheetId"]);
     const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
     const stagingCol  = findCol(header, ["Staging code","Staging Code","StagingCode","Staging"]);
+    const sealCol     = findCol(header, ["Seal code","Seal Code","seal_number","Seal Number","SealCode","seal_code"]);
     if(sellerCol === -1 || sortCol === -1){
       throw new Error("Assignment sheet missing seller_name / cluster_code columns");
     }
@@ -464,11 +466,13 @@ async function pullSheets(){
       seller: (r[sellerCol]||"").trim(),
       sortCode: (r[sortCol]||"").trim(),
       runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
-      stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : ""
+      stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : "",
+      sealCode: sealCol !== -1 ? (r[sealCol]||"").trim() : ""
     })).filter(r => r.sortCode || r.seller);
 
     // --- Build derived indices ---
     const runsheetIndex = new Map();
+    const sealIndex = new Map();
     const stagingIndex = new Map();
     const sortCodeSellers = new Map();
     const sellerSortCodes = new Map();
@@ -477,6 +481,10 @@ async function pullSheets(){
     for(const row of rows){
       if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
         runsheetIndex.set(row.runsheetId, row);
+      }
+      if(row.sealCode){
+        const sealKey = normalizeCode(row.sealCode);
+        if(sealKey && !sealIndex.has(sealKey)) sealIndex.set(sealKey, row);
       }
       if(row.sortCode && row.stagingCode){
         const key = normalizeCode(row.sortCode);
@@ -498,6 +506,7 @@ async function pullSheets(){
 
     ASSIGNMENT_ROWS = rows;
     RUNSHEET_INDEX = runsheetIndex;
+    SEAL_INDEX = sealIndex;
     STAGING_INDEX = stagingIndex;
     SORTCODE_SELLERS = sortCodeSellers;
     SELLER_SORTCODES = sellerSortCodes;
@@ -625,22 +634,25 @@ function tagCard({eyebrow, big, metaLeft, metaRight, note, dim}){
 const sortResults = document.getElementById("sortResults");
 
 function handleBarcodeResult(rawText){
-  const runsheetId = normalizeRunsheetId(rawText);
   sortResults.innerHTML = "";
 
-  if(!runsheetId){
-    sortResults.innerHTML = `<div class="status-note err">Barcode read as "${escapeHtml(rawText)}" — doesn't look like a runsheet ID. Try again or use the sort code fallback.</div>`;
-    return;
-  }
-  const row = RUNSHEET_INDEX.get(runsheetId);
+  const runsheetId = normalizeRunsheetId(rawText);
+  const sealKey = normalizeCode(rawText);
+
+  let row = null;
+  if(runsheetId) row = RUNSHEET_INDEX.get(runsheetId);
+  if(!row && sealKey) row = SEAL_INDEX.get(sealKey);
+
   if(!row){
-    sortResults.innerHTML = `<div class="status-note err">Runsheet ${escapeHtml(runsheetId)} isn't in today's assignment sheet yet. Check with your supervisor, or use the sort code fallback below.</div>`;
+    sortResults.innerHTML = `<div class="status-note err">"${escapeHtml(rawText)}" wasn't found as a runsheet barcode or a seal code in today's assignment sheet. Check with your supervisor, or use the sort code fallback below.</div>`;
+    scrollToResults();
     return;
   }
 
   const staging = row.stagingCode || STAGING_INDEX.get(normalizeCode(row.sortCode));
   if(!staging){
     sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet — check with your supervisor.</div>`;
+    scrollToResults();
     return;
   }
 
@@ -650,6 +662,11 @@ function handleBarcodeResult(rawText){
     metaLeft: {k:"Sort code", v: row.sortCode},
     metaRight: {k:"Seller", v: row.seller || "—"}
   });
+  scrollToResults();
+}
+
+function scrollToResults(){
+  sortResults.scrollIntoView({behavior:"smooth", block:"start"});
 }
 
 /* ---------- Sorter: sort-code fallback path ---------- */
@@ -694,6 +711,7 @@ function renderSortCodeFallback(input){
 
   if(match.status === "notfound"){
     sortResults.innerHTML = `<div class="status-note err">No staging code found for "${escapeHtml(input.toUpperCase())}". Double-check the code on the tag, or check with your supervisor.</div>`;
+    scrollToResults();
     return;
   }
 
@@ -713,6 +731,7 @@ function renderSortCodeFallback(input){
     metaRight: {k:"Seller", v: sellerText},
     note
   });
+  scrollToResults();
 }
 
 let typeTimer = null;
@@ -814,6 +833,7 @@ const barcodeStatus = document.getElementById("barcodeStatus");
 let zxingReader = null;
 
 async function openBarcodeScanner(){
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   barcodeModal.classList.add("open");
   barcodeStatus.textContent = "Starting camera…";
   try{
@@ -944,6 +964,7 @@ function captureFrameToCanvas(rotationDeg){
 }
 
 async function openCamera(){
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
   matchHistory = [];
