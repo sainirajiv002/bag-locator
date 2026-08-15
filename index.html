@@ -280,7 +280,7 @@
     <div class="brand-mark">B</div>
     <div>
       <h1>Bag Locator</h1>
-      <p>NCR Bamnoli DC · Block-A staging</p>
+      <p>NCR Bamnoli DC · Staging lookup</p>
     </div>
   </div>
   <div class="sync stale" id="syncPill" title="Tap to refresh now">
@@ -332,7 +332,7 @@
       <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller name…" autocomplete="off">
       <div class="ac-list" id="acList"></div>
     </div>
-    <p class="hint">Pick your seller to see the staging code(s) for their Block-A bags.</p>
+    <p class="hint">Pick your seller to see the staging code(s) for their bags.</p>
 
     <div class="results" id="findResults"></div>
   </section>
@@ -371,11 +371,15 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 /* ======================= CONFIG =======================
-   ONE Google Sheet — your daily DSP export, with one extra column added
-   at the end: "Staging Code" (filled in for Block-A rows).
+   ONE Google Sheet — your daily DSP export, with a "Staging code" column.
+   That column already carries the full answer per row: either a real
+   staging zone name (e.g. "Greater Noida", "Rohini, Delhi") or a process
+   label (e.g. "SDD", "NDD", "Pincode update") — both are shown as-is,
+   whatever the sheet says is what the sorter/rider sees.
 
-   Needs at least these headers (any extra columns are ignored):
-     seller_name | Sort code | Service type | dsp_latest_runsheet_id | Staging Code
+   Needs at least these headers (any extra columns are ignored; header
+   names are matched case-insensitively so small variations are fine):
+     seller_name | cluster_code (or "Sort code") | runsheet_id | Staging code
    (awb_number optional, shown if present)
 
    Sheet must be shared "Anyone with the link — Viewer".
@@ -388,12 +392,12 @@ const REFRESH_MS = 30000; // re-pull the sheet every 30s
 
 const assignmentUrl = `https://docs.google.com/spreadsheets/d/${ASSIGNMENT_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(ASSIGNMENT_TAB)}`;
 
-let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, serviceType, runsheetId, stagingCode}]
+let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, runsheetId, stagingCode}]
 let RUNSHEET_INDEX = new Map();  // normalized runsheetId -> row
-let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode (built from the Staging Code column)
-let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller) [Block-A only]
-let BLOCKA_SELLER_LIST = [];     // unique seller names, Block-A only
-let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode) [Block-A only]
+let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode (fallback enrichment across rows sharing a sort code)
+let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller)
+let SELLER_LIST = [];            // unique seller names (any row with a staging code)
+let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode)
 
 let lastSync = null;
 
@@ -436,9 +440,6 @@ function normalizeCode(raw){
 function normalizeRunsheetId(raw){
   return (raw||"").toString().trim().replace(/\.0+$/,"").replace(/[^0-9]/g,"");
 }
-function isBlockA(serviceType){
-  return (serviceType||"").trim().toLowerCase() === "block-a";
-}
 
 async function pullSheets(){
   setSyncState("loading");
@@ -451,19 +452,17 @@ async function pullSheets(){
     if(!table.length) throw new Error("Assignment sheet is empty");
     const header = table[0];
     const sellerCol   = findCol(header, ["seller_name","Seller Name","Seller"]);
-    const sortCol     = findCol(header, ["Sort code","sort_code","SortCode"]);
-    const serviceCol  = findCol(header, ["Service type","service_type","ServiceType"]);
-    const runsheetCol = findCol(header, ["dsp_latest_runsheet_id","Runsheet ID","runsheet_id","RunsheetId"]);
+    const sortCol     = findCol(header, ["cluster_code","Cluster Code","Sort code","sort_code","SortCode"]);
+    const runsheetCol = findCol(header, ["runsheet_id","dsp_latest_runsheet_id","Runsheet ID","RunsheetId"]);
     const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
-    const stagingCol  = findCol(header, ["Staging Code","StagingCode","Staging"]);
-    if(sellerCol === -1 || sortCol === -1 || serviceCol === -1){
-      throw new Error("Assignment sheet missing seller_name / Sort code / Service type columns");
+    const stagingCol  = findCol(header, ["Staging code","Staging Code","StagingCode","Staging"]);
+    if(sellerCol === -1 || sortCol === -1){
+      throw new Error("Assignment sheet missing seller_name / cluster_code columns");
     }
     const rows = table.slice(1).map(r => ({
       awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
       seller: (r[sellerCol]||"").trim(),
       sortCode: (r[sortCol]||"").trim(),
-      serviceType: (r[serviceCol]||"").trim(),
       runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
       stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : ""
     })).filter(r => r.sortCode || r.seller);
@@ -473,7 +472,7 @@ async function pullSheets(){
     const stagingIndex = new Map();
     const sortCodeSellers = new Map();
     const sellerSortCodes = new Map();
-    const blockASellersSet = new Set();
+    const sellersSet = new Set();
 
     for(const row of rows){
       if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
@@ -483,13 +482,13 @@ async function pullSheets(){
         const key = normalizeCode(row.sortCode);
         if(!stagingIndex.has(key)) stagingIndex.set(key, row.stagingCode);
       }
-      if(isBlockA(row.serviceType) && row.sortCode){
+      if(row.sortCode && row.stagingCode){
         const key = normalizeCode(row.sortCode);
         if(!sortCodeSellers.has(key)) sortCodeSellers.set(key, new Set());
         if(row.seller) sortCodeSellers.get(key).add(row.seller);
 
         if(row.seller){
-          blockASellersSet.add(row.seller);
+          sellersSet.add(row.seller);
           const sellerKey = row.seller.toLowerCase();
           if(!sellerSortCodes.has(sellerKey)) sellerSortCodes.set(sellerKey, new Set());
           sellerSortCodes.get(sellerKey).add(key);
@@ -502,7 +501,7 @@ async function pullSheets(){
     STAGING_INDEX = stagingIndex;
     SORTCODE_SELLERS = sortCodeSellers;
     SELLER_SORTCODES = sellerSortCodes;
-    BLOCKA_SELLER_LIST = [...blockASellersSet].sort();
+    SELLER_LIST = [...sellersSet].sort();
 
     lastSync = new Date();
     setSyncState("ok");
@@ -639,21 +638,9 @@ function handleBarcodeResult(rawText){
     return;
   }
 
-  if(!isBlockA(row.serviceType)){
-    sortResults.innerHTML = tagCard({
-      eyebrow: "Service type",
-      big: row.serviceType || "—",
-      metaLeft: {k:"Sort code", v: row.sortCode || "—"},
-      metaRight: {k:"Seller", v: row.seller || "—"},
-      note: "Staging not required for this service type yet.",
-      dim: true
-    });
-    return;
-  }
-
-  const staging = STAGING_INDEX.get(normalizeCode(row.sortCode));
+  const staging = row.stagingCode || STAGING_INDEX.get(normalizeCode(row.sortCode));
   if(!staging){
-    sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (Block-A, seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet — check with your supervisor.</div>`;
+    sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet — check with your supervisor.</div>`;
     return;
   }
 
@@ -742,7 +729,7 @@ codeInput.addEventListener("keydown", (e)=>{
 });
 codeInput.addEventListener("focus", ()=> codeInput.select());
 
-/* ---------- Rider: seller search (Block-A only) ---------- */
+/* ---------- Rider: seller search ---------- */
 const sellerInput = document.getElementById("sellerInput");
 const acList = document.getElementById("acList");
 const findResults = document.getElementById("findResults");
@@ -753,9 +740,9 @@ function renderAutocomplete(q){
   const query = q.trim().toLowerCase();
   hiIndex = -1;
   if(!query){ acList.classList.remove("open"); acList.innerHTML=""; return; }
-  currentOptions = BLOCKA_SELLER_LIST.filter(s => s.toLowerCase().includes(query)).slice(0,30);
+  currentOptions = SELLER_LIST.filter(s => s.toLowerCase().includes(query)).slice(0,30);
   if(!currentOptions.length){
-    acList.innerHTML = `<div class="ac-empty">No Block-A sellers match "${escapeHtml(q)}"</div>`;
+    acList.innerHTML = `<div class="ac-empty">No sellers match "${escapeHtml(q)}"</div>`;
     acList.classList.add("open");
     return;
   }
@@ -799,7 +786,7 @@ function selectSeller(name){
   acList.classList.remove("open");
   const codes = [...(SELLER_SORTCODES.get(name.toLowerCase()) || [])];
   if(!codes.length){
-    findResults.innerHTML = `<div class="status-note err">No Block-A bag found for "${escapeHtml(name)}".</div>`;
+    findResults.innerHTML = `<div class="status-note err">No bag found for "${escapeHtml(name)}".</div>`;
     return;
   }
   findResults.innerHTML = codes.map(code => {
