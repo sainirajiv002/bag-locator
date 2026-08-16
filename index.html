@@ -78,6 +78,34 @@
     flex-direction:column;
   }
 
+  /* Block selector — global state, sits above the Sort/Find tabs */
+  .block-select{
+    margin:10px 0 4px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:12px;
+  }
+  .block-select-label{
+    font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted); margin:0 2px 10px;
+  }
+  .block-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .block-btn{
+    appearance:none;border:1.5px solid var(--line);background:var(--surface-2);
+    color:var(--text);font-family:inherit;font-weight:700;font-size:15px;
+    padding:14px;border-radius:12px;cursor:pointer;
+  }
+  .block-btn.active{background:var(--blue);border-color:var(--blue);color:#0b1420;}
+
+  .no-block-banner{
+    margin:14px 0; padding:14px 16px; border-radius:12px;
+    background:var(--surface-2); border:1px solid #5a4a1a; color:var(--amber);
+    font-size:13px; text-align:center; font-weight:600;
+    display:none;
+  }
+  .no-block-banner.show{display:block;}
+
   .tabs{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -116,6 +144,7 @@
   }
   .big-scan-btn svg{width:22px;height:22px;}
   .big-scan-btn:active{background:var(--neon-dim);}
+  .big-scan-btn:disabled{opacity:.4;cursor:not-allowed;}
 
   .divider{
     display:flex;align-items:center;gap:10px;
@@ -142,6 +171,7 @@
     min-width:0;
   }
   .code-input:focus{border-color:var(--neon);}
+  .code-input:disabled{opacity:.4;}
   .code-input::placeholder{color:#565d64;font-weight:500;letter-spacing:0;text-transform:none;font-family:'Inter';font-size:15px;}
 
   .cam-btn{
@@ -292,6 +322,15 @@
 
 <main>
 
+  <div class="block-select">
+    <div class="block-select-label">Working block</div>
+    <div class="block-buttons">
+      <button class="block-btn" id="blockBtnA">Block A</button>
+      <button class="block-btn" id="blockBtnB">Block B</button>
+    </div>
+  </div>
+  <div class="no-block-banner" id="noBlockBanner">Select a block above before scanning — staging codes differ by block.</div>
+
   <div class="tabs">
     <button id="tabSort" class="active">Sort Bag</button>
     <button id="tabFind">Find My Bag</button>
@@ -332,7 +371,7 @@
       <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller name…" autocomplete="off">
       <div class="ac-list" id="acList"></div>
     </div>
-    <p class="hint">Pick your seller to see the staging code(s) for their bags.</p>
+    <p class="hint">Pick your seller to see the staging code(s) for their bags in the selected block.</p>
 
     <div class="results" id="findResults"></div>
   </section>
@@ -371,36 +410,36 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 /* ======================= CONFIG =======================
-   ONE Google Sheet — your daily DSP export, with a "Staging code" column.
-   That column already carries the full answer per row: either a real
-   staging zone name (e.g. "Greater Noida", "Rohini, Delhi") or a process
-   label (e.g. "SDD", "NDD", "Pincode update") — both are shown as-is,
-   whatever the sheet says is what the sorter/rider sees.
+   ONE spreadsheet, three tabs:
+     - "Block A" and "Block B" — same schema, one row per AWB:
+         seller_name | cluster_code (or "Sort code") | runsheet_id | Staging code | Seal code
+       Same seal IDs can appear in both blocks with DIFFERENT staging codes —
+       that's expected; the block selector decides which tab is looked up.
+     - "Audit sheet" — write-only from this tool. Every successful scan
+       appends a row via the Apps Script Web App below.
 
-   Needs at least these headers (any extra columns are ignored; header
-   names are matched case-insensitively so small variations are fine):
-     seller_name | cluster_code (or "Sort code") | runsheet_id | Staging code | Seal code
-   (awb_number optional, shown if present)
-
-   Sheet must be shared "Anyone with the link — Viewer".
+   All three tabs must be shared "Anyone with the link — Viewer" (Audit
+   sheet too, so you can read it back in Sheets — writes go through the
+   Web App, not the CSV export).
 ========================================================= */
-const ASSIGNMENT_SHEET_ID = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
-const ASSIGNMENT_TAB      = "Sheet1";
+const SPREADSHEET_ID = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
+const BLOCK_TABS = { A: "Block A", B: "Block B" };
 
-const REFRESH_MS = 30000; // re-pull the sheet every 30s
+// Paste the /exec URL from your Apps Script Web App deployment here.
+// Until this is set, scans still work — the audit log just won't record.
+const AUDIT_WEBAPP_URL = "PUT_AUDIT_WEBAPP_URL_HERE";
+
+const REFRESH_MS = 30000; // re-pull both block sheets every 30s
 /* ======================================================= */
 
-const assignmentUrl = `https://docs.google.com/spreadsheets/d/${ASSIGNMENT_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(ASSIGNMENT_TAB)}`;
+function sheetUrl(tab){
+  return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+}
 
-let ASSIGNMENT_ROWS = [];        // [{awb, seller, sortCode, runsheetId, stagingCode}]
-let RUNSHEET_INDEX = new Map();  // normalized runsheetId -> row
-let STAGING_INDEX = new Map();   // normalized sortCode -> stagingCode (fallback enrichment across rows sharing a sort code)
-let SORTCODE_SELLERS = new Map();// normalized sortCode -> Set(seller)
-let SELLER_LIST = [];            // unique seller names (any row with a staging code)
-let SELLER_SORTCODES = new Map();// sellerNameLower -> Set(normalized sortCode)
-let SEAL_INDEX = new Map();      // normalized sealCode -> row
-
+let BLOCKS = { A: null, B: null };   // each: {rows, RUNSHEET_INDEX, SEAL_INDEX, STAGING_INDEX, SORTCODE_SELLERS, SELLER_SORTCODES, SELLER_LIST}
+let currentBlock = null;             // 'A' | 'B'
 let lastSync = null;
+let syncHadError = false;
 
 /* ---------- CSV parsing (handles quoted commas) ---------- */
 function parseCSV(text){
@@ -442,85 +481,103 @@ function normalizeRunsheetId(raw){
   return (raw||"").toString().trim().replace(/\.0+$/,"").replace(/[^0-9]/g,"");
 }
 
-async function pullSheets(){
-  setSyncState("loading");
-  try{
-    const res = await fetch(assignmentUrl, {cache:"no-store"});
-    if(!res.ok) throw new Error("Assignment sheet: HTTP " + res.status);
-    const text = await res.text();
-
-    const table = parseCSV(text);
-    if(!table.length) throw new Error("Assignment sheet is empty");
-    const header = table[0];
-    const sellerCol   = findCol(header, ["seller_name","Seller Name","Seller"]);
-    const sortCol     = findCol(header, ["cluster_code","Cluster Code","Sort code","sort_code","SortCode"]);
-    const runsheetCol = findCol(header, ["runsheet_id","dsp_latest_runsheet_id","Runsheet ID","RunsheetId"]);
-    const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
-    const stagingCol  = findCol(header, ["Staging code","Staging Code","StagingCode","Staging"]);
-    const sealCol     = findCol(header, ["Seal code","Seal Code","seal_number","Seal Number","SealCode","seal_code"]);
-    if(sellerCol === -1 || sortCol === -1){
-      throw new Error("Assignment sheet missing seller_name / cluster_code columns");
-    }
-    const rows = table.slice(1).map(r => ({
-      awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
-      seller: (r[sellerCol]||"").trim(),
-      sortCode: (r[sortCol]||"").trim(),
-      runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
-      stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : "",
-      sealCode: sealCol !== -1 ? (r[sealCol]||"").trim() : ""
-    })).filter(r => r.sortCode || r.seller);
-
-    // --- Build derived indices ---
-    const runsheetIndex = new Map();
-    const sealIndex = new Map();
-    const stagingIndex = new Map();
-    const sortCodeSellers = new Map();
-    const sellerSortCodes = new Map();
-    const sellersSet = new Set();
-
-    for(const row of rows){
-      if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
-        runsheetIndex.set(row.runsheetId, row);
-      }
-      if(row.sealCode){
-        const sealKey = normalizeCode(row.sealCode);
-        if(sealKey && !sealIndex.has(sealKey)) sealIndex.set(sealKey, row);
-      }
-      if(row.sortCode && row.stagingCode){
-        const key = normalizeCode(row.sortCode);
-        if(!stagingIndex.has(key)) stagingIndex.set(key, row.stagingCode);
-      }
-      if(row.sortCode && row.stagingCode){
-        const key = normalizeCode(row.sortCode);
-        if(!sortCodeSellers.has(key)) sortCodeSellers.set(key, new Set());
-        if(row.seller) sortCodeSellers.get(key).add(row.seller);
-
-        if(row.seller){
-          sellersSet.add(row.seller);
-          const sellerKey = row.seller.toLowerCase();
-          if(!sellerSortCodes.has(sellerKey)) sellerSortCodes.set(sellerKey, new Set());
-          sellerSortCodes.get(sellerKey).add(key);
-        }
-      }
-    }
-
-    ASSIGNMENT_ROWS = rows;
-    RUNSHEET_INDEX = runsheetIndex;
-    SEAL_INDEX = sealIndex;
-    STAGING_INDEX = stagingIndex;
-    SORTCODE_SELLERS = sortCodeSellers;
-    SELLER_SORTCODES = sellerSortCodes;
-    SELLER_LIST = [...sellersSet].sort();
-
-    lastSync = new Date();
-    setSyncState("ok");
-  }catch(err){
-    console.error(err);
-    setSyncState("error", err.message);
+function parseAssignmentCSV(text){
+  const table = parseCSV(text);
+  if(!table.length) throw new Error("Sheet is empty");
+  const header = table[0];
+  const sellerCol   = findCol(header, ["seller_name","Seller Name","Seller"]);
+  const sortCol     = findCol(header, ["cluster_code","Cluster Code","Sort code","sort_code","SortCode"]);
+  const runsheetCol = findCol(header, ["runsheet_id","dsp_latest_runsheet_id","Runsheet ID","RunsheetId"]);
+  const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
+  const stagingCol  = findCol(header, ["Staging code","Staging Code","StagingCode","Staging"]);
+  const sealCol     = findCol(header, ["Seal code","Seal Code","seal_number","Seal Number","SealCode","seal_code"]);
+  if(sellerCol === -1 || sortCol === -1){
+    throw new Error("Sheet missing seller_name / cluster_code columns");
   }
+  return table.slice(1).map(r => ({
+    awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
+    seller: (r[sellerCol]||"").trim(),
+    sortCode: (r[sortCol]||"").trim(),
+    runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
+    stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : "",
+    sealCode: sealCol !== -1 ? (r[sealCol]||"").trim() : ""
+  })).filter(r => r.sortCode || r.seller);
 }
 
-function setSyncState(state, msg){
+function buildIndices(rows){
+  const runsheetIndex = new Map();
+  const sealIndex = new Map();
+  const stagingIndex = new Map();
+  const sortCodeSellers = new Map();
+  const sellerSortCodes = new Map();
+  const sellersSet = new Set();
+
+  for(const row of rows){
+    if(row.runsheetId && !runsheetIndex.has(row.runsheetId)){
+      runsheetIndex.set(row.runsheetId, row);
+    }
+    if(row.sealCode){
+      const sealKey = normalizeCode(row.sealCode);
+      if(sealKey && !sealIndex.has(sealKey)) sealIndex.set(sealKey, row);
+    }
+    if(row.sortCode && row.stagingCode){
+      const key = normalizeCode(row.sortCode);
+      if(!stagingIndex.has(key)) stagingIndex.set(key, row.stagingCode);
+      if(!sortCodeSellers.has(key)) sortCodeSellers.set(key, new Set());
+      if(row.seller) sortCodeSellers.get(key).add(row.seller);
+      if(row.seller){
+        sellersSet.add(row.seller);
+        const sellerKey = row.seller.toLowerCase();
+        if(!sellerSortCodes.has(sellerKey)) sellerSortCodes.set(sellerKey, new Set());
+        sellerSortCodes.get(sellerKey).add(key);
+      }
+    }
+  }
+
+  return {
+    rows,
+    RUNSHEET_INDEX: runsheetIndex,
+    SEAL_INDEX: sealIndex,
+    STAGING_INDEX: stagingIndex,
+    SORTCODE_SELLERS: sortCodeSellers,
+    SELLER_SORTCODES: sellerSortCodes,
+    SELLER_LIST: [...sellersSet].sort()
+  };
+}
+
+async function pullSheets(){
+  setSyncState("loading");
+  const results = await Promise.allSettled(
+    ["A","B"].map(b => fetch(sheetUrl(BLOCK_TABS[b]), {cache:"no-store"}).then(r=>{
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }))
+  );
+
+  let anyError = false;
+  results.forEach((res, i) => {
+    const block = ["A","B"][i];
+    if(res.status === "fulfilled"){
+      try{
+        const rows = parseAssignmentCSV(res.value);
+        BLOCKS[block] = buildIndices(rows);
+      }catch(err){
+        console.error(`Block ${block} parse error:`, err);
+        anyError = true; // keep old BLOCKS[block] if any
+      }
+    } else {
+      console.error(`Block ${block} fetch error:`, res.reason);
+      anyError = true; // keep old BLOCKS[block] if any
+    }
+  });
+
+  syncHadError = anyError && (!BLOCKS.A || !BLOCKS.B); // only truly "error" if a block has no data at all
+  lastSync = new Date();
+  setSyncState(syncHadError ? "error" : "ok");
+  updateBlockButtonsEnabled();
+}
+
+function setSyncState(state){
   const pill = document.getElementById("syncPill");
   const txt = document.getElementById("syncText");
   pill.classList.remove("stale","error");
@@ -548,6 +605,40 @@ function tickSyncLabel(){
 setInterval(tickSyncLabel, 1000);
 document.getElementById("syncPill").addEventListener("click", pullSheets);
 
+function updateBlockButtonsEnabled(){
+  // no-op hook if we ever want to disable a block button with no data at all
+}
+
+/* ---------- Block selector ---------- */
+const blockBtnA = document.getElementById("blockBtnA");
+const blockBtnB = document.getElementById("blockBtnB");
+const noBlockBanner = document.getElementById("noBlockBanner");
+
+function selectBlock(block){
+  currentBlock = block;
+  try{ localStorage.setItem("bagLocatorBlock", block); }catch(e){}
+  blockBtnA.classList.toggle("active", block === "A");
+  blockBtnB.classList.toggle("active", block === "B");
+  noBlockBanner.classList.remove("show");
+  sortResults.innerHTML = "";
+  findResults.innerHTML = "";
+}
+blockBtnA.addEventListener("click", ()=> selectBlock("A"));
+blockBtnB.addEventListener("click", ()=> selectBlock("B"));
+
+function requireBlock(){
+  if(!currentBlock){
+    noBlockBanner.classList.add("show");
+    return null;
+  }
+  const idx = BLOCKS[currentBlock];
+  if(!idx){
+    sortResults.innerHTML = `<div class="status-note err">Block ${currentBlock} data hasn't loaded yet — wait a moment and try again.</div>`;
+    return null;
+  }
+  return idx;
+}
+
 /* ---------- Fuzzy matching for the sort-code fallback ---------- */
 const CONFUSABLE_MAP = { "O":"0","Q":"0","D":"0","I":"1","L":"1","Z":"2","S":"5","B":"8","G":"6","T":"7" };
 function canonicalize(code){
@@ -564,8 +655,6 @@ function levenshtein(a,b){
   }
   return dp[m][n];
 }
-// Matches a raw candidate against a Set of normalized keys (used for the
-// sort-code fallback, matching against STAGING_INDEX's keys).
 function matchCode(rawInput, keySet){
   const key = normalizeCode(rawInput);
   if(!key) return {status:"empty"};
@@ -594,6 +683,18 @@ function minKeyLength(keySet){
   let min = Infinity;
   for(const k of keySet) if(k.length < min) min = k.length;
   return Number.isFinite(min) ? min : 4;
+}
+
+/* ---------- Audit logging (fire-and-forget) ---------- */
+function logAudit(sealId, block){
+  if(!AUDIT_WEBAPP_URL || AUDIT_WEBAPP_URL.indexOf("PUT_") === 0) return;
+  const payload = { timestamp: new Date().toISOString(), block: block, sealId: sealId || "" };
+  fetch(AUDIT_WEBAPP_URL, {
+    method: "POST",
+    mode: "no-cors", // Apps Script doesn't return CORS headers we can read — fire-and-forget
+    headers: {"Content-Type":"text/plain;charset=utf-8"}, // avoids a CORS preflight
+    body: JSON.stringify(payload)
+  }).catch(()=>{});
 }
 
 /* ---------- Tabs ---------- */
@@ -630,43 +731,46 @@ function tagCard({eyebrow, big, metaLeft, metaRight, note, dim}){
     </div>`;
 }
 
-/* ---------- Sorter: barcode path (via runsheet ID) ---------- */
+/* ---------- Sorter: barcode / seal path (via runsheet ID or seal code) ---------- */
 const sortResults = document.getElementById("sortResults");
 
+function scrollToResults(){
+  sortResults.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
 function handleBarcodeResult(rawText){
+  const idx = requireBlock();
   sortResults.innerHTML = "";
+  if(!idx) return;
 
   const runsheetId = normalizeRunsheetId(rawText);
   const sealKey = normalizeCode(rawText);
 
   let row = null;
-  if(runsheetId) row = RUNSHEET_INDEX.get(runsheetId);
-  if(!row && sealKey) row = SEAL_INDEX.get(sealKey);
+  if(runsheetId) row = idx.RUNSHEET_INDEX.get(runsheetId);
+  if(!row && sealKey) row = idx.SEAL_INDEX.get(sealKey);
 
   if(!row){
-    sortResults.innerHTML = `<div class="status-note err">"${escapeHtml(rawText)}" wasn't found as a runsheet barcode or a seal code in today's assignment sheet. Check with your supervisor, or use the sort code fallback below.</div>`;
+    sortResults.innerHTML = `<div class="status-note err">"${escapeHtml(rawText)}" wasn't found as a runsheet barcode or a seal code in Block ${currentBlock}'s sheet. Check with your supervisor, or use the sort code fallback below.</div>`;
     scrollToResults();
     return;
   }
 
-  const staging = row.stagingCode || STAGING_INDEX.get(normalizeCode(row.sortCode));
+  const staging = row.stagingCode || idx.STAGING_INDEX.get(normalizeCode(row.sortCode));
   if(!staging){
-    sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet — check with your supervisor.</div>`;
+    sortResults.innerHTML = `<div class="status-note warn">Sort code ${escapeHtml(row.sortCode)} (seller: ${escapeHtml(row.seller||"—")}) doesn't have a staging code yet in Block ${currentBlock} — check with your supervisor.</div>`;
     scrollToResults();
     return;
   }
 
   sortResults.innerHTML = tagCard({
-    eyebrow: "Stage this bag at",
+    eyebrow: `Stage this bag at (Block ${currentBlock})`,
     big: staging,
     metaLeft: {k:"Sort code", v: row.sortCode},
     metaRight: {k:"Seller", v: row.seller || "—"}
   });
   scrollToResults();
-}
-
-function scrollToResults(){
-  sortResults.scrollIntoView({behavior:"smooth", block:"start"});
+  logAudit(row.sealCode || row.runsheetId || row.sortCode, currentBlock);
 }
 
 /* ---------- Sorter: sort-code fallback path ---------- */
@@ -686,8 +790,6 @@ hhdInput.addEventListener("keydown", (e)=>{
     }
   }
 });
-// Some HHD configurations don't send Enter — catch that case too, once the
-// scanned value is long enough to plausibly be a full runsheet ID.
 let hhdTimer = null;
 hhdInput.addEventListener("input", ()=>{
   clearTimeout(hhdTimer);
@@ -702,21 +804,23 @@ hhdInput.addEventListener("input", ()=>{
   }
 });
 
-
 function renderSortCodeFallback(input){
-  const keys = new Set(STAGING_INDEX.keys());
-  const match = matchCode(input, keys);
+  const idx = requireBlock();
   sortResults.innerHTML = "";
+  if(!idx) return;
+
+  const keys = new Set(idx.STAGING_INDEX.keys());
+  const match = matchCode(input, keys);
   if(match.status === "empty") return;
 
   if(match.status === "notfound"){
-    sortResults.innerHTML = `<div class="status-note err">No staging code found for "${escapeHtml(input.toUpperCase())}". Double-check the code on the tag, or check with your supervisor.</div>`;
+    sortResults.innerHTML = `<div class="status-note err">No staging code found for "${escapeHtml(input.toUpperCase())}" in Block ${currentBlock}. Double-check the code on the tag, or check with your supervisor.</div>`;
     scrollToResults();
     return;
   }
 
-  const stageCode = STAGING_INDEX.get(match.matchedKey);
-  const sellers = [...(SORTCODE_SELLERS.get(match.matchedKey) || [])];
+  const stageCode = idx.STAGING_INDEX.get(match.matchedKey);
+  const sellers = [...(idx.SORTCODE_SELLERS.get(match.matchedKey) || [])];
   const sellerText = sellers.length === 0 ? "—" : sellers.length === 1 ? sellers[0] : `${sellers.length} sellers use this code`;
 
   let note = "";
@@ -725,13 +829,14 @@ function renderSortCodeFallback(input){
   }
 
   sortResults.innerHTML = tagCard({
-    eyebrow: "Stage this bag at",
+    eyebrow: `Stage this bag at (Block ${currentBlock})`,
     big: stageCode,
     metaLeft: {k:"Sort code", v: match.matchedKey},
     metaRight: {k:"Seller", v: sellerText},
     note
   });
   scrollToResults();
+  logAudit(match.matchedKey, currentBlock);
 }
 
 let typeTimer = null;
@@ -739,7 +844,9 @@ codeInput.addEventListener("input", ()=>{
   clearTimeout(typeTimer);
   const val = normalizeCode(codeInput.value);
   if(!val){ sortResults.innerHTML = ""; return; }
-  if(val.length >= minKeyLength(new Set(STAGING_INDEX.keys()))){
+  const idx = currentBlock ? BLOCKS[currentBlock] : null;
+  const minLen = idx ? minKeyLength(new Set(idx.STAGING_INDEX.keys())) : 4;
+  if(val.length >= minLen){
     typeTimer = setTimeout(()=> renderSortCodeFallback(codeInput.value), 80);
   }
 });
@@ -756,19 +863,21 @@ let hiIndex = -1;
 let currentOptions = [];
 
 function renderAutocomplete(q){
+  const idx = requireBlock();
   const query = q.trim().toLowerCase();
   hiIndex = -1;
+  if(!idx){ acList.classList.remove("open"); return; }
   if(!query){ acList.classList.remove("open"); acList.innerHTML=""; return; }
-  currentOptions = SELLER_LIST.filter(s => s.toLowerCase().includes(query)).slice(0,30);
+  currentOptions = idx.SELLER_LIST.filter(s => s.toLowerCase().includes(query)).slice(0,30);
   if(!currentOptions.length){
-    acList.innerHTML = `<div class="ac-empty">No sellers match "${escapeHtml(q)}"</div>`;
+    acList.innerHTML = `<div class="ac-empty">No sellers match "${escapeHtml(q)}" in Block ${currentBlock}</div>`;
     acList.classList.add("open");
     return;
   }
   acList.innerHTML = currentOptions.map((s,i)=>{
-    const idx = s.toLowerCase().indexOf(query);
-    const marked = idx === -1 ? escapeHtml(s) :
-      escapeHtml(s.slice(0,idx)) + "<b>" + escapeHtml(s.slice(idx, idx+query.length)) + "</b>" + escapeHtml(s.slice(idx+query.length));
+    const idx2 = s.toLowerCase().indexOf(query);
+    const marked = idx2 === -1 ? escapeHtml(s) :
+      escapeHtml(s.slice(0,idx2)) + "<b>" + escapeHtml(s.slice(idx2, idx2+query.length)) + "</b>" + escapeHtml(s.slice(idx2+query.length));
     return `<div class="ac-item" data-idx="${i}">${marked}</div>`;
   }).join("");
   acList.classList.add("open");
@@ -801,20 +910,23 @@ function highlight(items){
 }
 
 function selectSeller(name){
+  const idx = requireBlock();
   sellerInput.value = name;
   acList.classList.remove("open");
-  const codes = [...(SELLER_SORTCODES.get(name.toLowerCase()) || [])];
+  if(!idx) return;
+
+  const codes = [...(idx.SELLER_SORTCODES.get(name.toLowerCase()) || [])];
   if(!codes.length){
-    findResults.innerHTML = `<div class="status-note err">No bag found for "${escapeHtml(name)}".</div>`;
+    findResults.innerHTML = `<div class="status-note err">No bag found for "${escapeHtml(name)}" in Block ${currentBlock}.</div>`;
     return;
   }
   findResults.innerHTML = codes.map(code => {
-    const staging = STAGING_INDEX.get(code);
+    const staging = idx.STAGING_INDEX.get(code);
     if(!staging){
       return `<div class="status-note warn">Sort code ${escapeHtml(code)} doesn't have a staging code yet.</div>`;
     }
     return tagCard({
-      eyebrow: "Pick up at",
+      eyebrow: `Pick up at (Block ${currentBlock})`,
       big: staging,
       metaLeft: {k:"Sort code", v: code},
       metaRight: {k:"Seller", v: name}
@@ -833,6 +945,7 @@ const barcodeStatus = document.getElementById("barcodeStatus");
 let zxingReader = null;
 
 async function openBarcodeScanner(){
+  if(!requireBlock()) return;
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   barcodeModal.classList.add("open");
   barcodeStatus.textContent = "Starting camera…";
@@ -841,9 +954,6 @@ async function openBarcodeScanner(){
       throw new Error("Barcode library failed to load — check your internet connection");
     }
     if(!zxingReader){
-      // Restrict to the actual symbologies logistics barcodes use — trying
-      // every format (QR, Data Matrix, Aztec, etc.) on every frame is what
-      // was making this slow. This alone is a large speed win.
       const hints = new Map();
       hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
         ZXing.BarcodeFormat.CODE_128,
@@ -855,7 +965,6 @@ async function openBarcodeScanner(){
       zxingReader = new ZXing.BrowserMultiFormatReader(hints);
     }
 
-    // Prefer a rear-facing camera if we can tell from the device label.
     let deviceId = undefined;
     try{
       const devices = await zxingReader.listVideoInputDevices();
@@ -864,9 +973,6 @@ async function openBarcodeScanner(){
     }catch(e){ /* fall through with no explicit device */ }
 
     barcodeStatus.textContent = "Point at the barcode — scanning…";
-    // decodeFromVideoDevice is the CONTINUOUS scanner (manages its own camera
-    // stream internally and keeps calling back until reset()) — unlike
-    // decodeFromVideoElement, which only ever decodes a single frame once.
     zxingReader.decodeFromVideoDevice(deviceId, barcodeVideo, (result, err) => {
       if(result){
         const text = result.getText();
@@ -874,7 +980,6 @@ async function openBarcodeScanner(){
         tabSort.click();
         handleBarcodeResult(text);
       }
-      // err fires every frame nothing is found (NotFoundException) — ignore it
     });
   }catch(err){
     console.error(err);
@@ -964,6 +1069,7 @@ function captureFrameToCanvas(rotationDeg){
 }
 
 async function openCamera(){
+  if(!requireBlock()) return;
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
@@ -1019,7 +1125,9 @@ async function scanLoopStep(){
       camStatus.textContent = "Point the camera at the tag — scanning…";
     }
 
-    const keys = new Set(STAGING_INDEX.keys());
+    const idx = currentBlock ? BLOCKS[currentBlock] : null;
+    if(!idx){ scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS); return; }
+    const keys = new Set(idx.STAGING_INDEX.keys());
     let bestExact = null, bestNear = null, bestNearDist = Infinity;
     for(const w of words){
       const match = matchCode(w, keys);
@@ -1055,6 +1163,13 @@ document.getElementById("camCapture").addEventListener("click", ()=>{
 /* ---------- Boot ---------- */
 pullSheets();
 setInterval(pullSheets, REFRESH_MS);
+try{
+  const saved = localStorage.getItem("bagLocatorBlock");
+  if(saved === "A" || saved === "B") selectBlock(saved);
+  else noBlockBanner.classList.add("show");
+}catch(e){
+  noBlockBanner.classList.add("show");
+}
 hhdInput.focus();
 </script>
 </body>
