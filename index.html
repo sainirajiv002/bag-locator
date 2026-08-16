@@ -427,7 +427,7 @@ const BLOCK_TABS = { A: "Block A", B: "Block B" };
 
 // Paste the /exec URL from your Apps Script Web App deployment here.
 // Until this is set, scans still work — the audit log just won't record.
-const AUDIT_WEBAPP_URL = "PUT_AUDIT_WEBAPP_URL_HERE";
+const AUDIT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyPozFo2aTVihQmOgW4uD_kaGaL3SMUujL5MIdkUMkolO12TaO97yxNj9bEDQNVIt8A/exec";
 
 const REFRESH_MS = 30000; // re-pull both block sheets every 30s
 /* ======================================================= */
@@ -901,7 +901,7 @@ sellerInput.addEventListener("keydown", (e)=>{
   else if(e.key === "Enter"){
     e.preventDefault();
     if(hiIndex >= 0 && currentOptions[hiIndex]) selectSeller(currentOptions[hiIndex]);
-    else if(currentOptions.length === 1) selectSeller(currentOptions[0]);
+    else if(currentOptions.length >= 1) selectSeller(currentOptions[0]);
   }
 });
 function highlight(items){
