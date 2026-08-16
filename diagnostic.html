@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sync Diagnostic</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#14171a;color:#f3f5f2;padding:20px;line-height:1.5;}
+  button{background:#c6ff33;color:#101210;border:0;padding:16px;border-radius:12px;font-weight:700;font-size:16px;width:100%;margin-bottom:20px;}
+  h2{font-size:15px;margin:20px 0 6px;}
+  pre{background:#1c2024;border:1px solid #33393f;border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:300px;overflow:auto;}
+  .ok{color:#c6ff33;} .err{color:#ff5d5d;}
+</style>
+</head>
+<body>
+<h1 style="font-size:18px;">Sheet Sync Diagnostic</h1>
+<button onclick="runTest()">Test Sync Now</button>
+<div id="out">Tap the button above.</div>
+
+<script>
+const SPREADSHEET_ID = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
+const TABS = { "Block A": "Block A", "Block B": "Block B" };
+
+async function testTab(label, tab){
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  const box = document.createElement("div");
+  box.innerHTML = `<h2>${label}</h2><pre>Fetching…\n${url}</pre>`;
+  document.getElementById("out").appendChild(box);
+  const pre = box.querySelector("pre");
+  try{
+    const res = await fetch(url, {cache:"no-store"});
+    const text = await res.text();
+    if(!res.ok){
+      pre.innerHTML = `<span class="err">HTTP ${res.status}</span>\n\nURL:\n${url}\n\nResponse body (first 500 chars):\n${escapeHtml(text.slice(0,500))}`;
+      return;
+    }
+    if(text.trim().startsWith("<")){
+      pre.innerHTML = `<span class="err">Got an HTML page instead of CSV — usually means the tab name is wrong, or the sheet needs "Anyone with the link" sharing.</span>\n\nURL:\n${url}\n\nFirst 300 chars of response:\n${escapeHtml(text.slice(0,300))}`;
+      return;
+    }
+    const rowCount = text.split("\n").length;
+
+    // Now replicate the seller-list logic to test it directly against real data
+    const table = parseCSV(text);
+    const header = table[0] || [];
+    const sellerCol = findCol(header, ["seller_name","Seller Name","Seller"]);
+    const sortCol = findCol(header, ["cluster_code","Cluster Code","Sort code","sort_code","SortCode"]);
+    const stagingCol = findCol(header, ["Staging code","Staging Code","StagingCode","Staging"]);
+
+    let sellerReport = "";
+    if(sellerCol === -1 || sortCol === -1 || stagingCol === -1){
+      sellerReport = `<span class="err">Missing a required column — sellerCol:${sellerCol} sortCol:${sortCol} stagingCol:${stagingCol} (-1 means not found)</span>\nHeader row seen: ${escapeHtml(JSON.stringify(header))}`;
+    } else {
+      const rows = table.slice(1);
+      let qualifying = 0;
+      const examples = [];
+      for(const r of rows){
+        const seller = (r[sellerCol]||"").trim();
+        const sortCode = (r[sortCol]||"").trim();
+        const staging = (r[stagingCol]||"").trim();
+        if(seller && sortCode && staging){
+          qualifying++;
+          if(examples.length < 5) examples.push(seller);
+        }
+      }
+      sellerReport = `Rows with a seller + sort code + staging code (these are what Find My Bag can search): <b>${qualifying}</b> of ${rows.length}\nExample sellers found: ${escapeHtml(JSON.stringify(examples))}`;
+    }
+
+    pre.innerHTML = `<span class="ok">OK — got CSV data, ~${rowCount} rows</span>\n\n${sellerReport}\n\nFirst 300 chars of raw CSV:\n${escapeHtml(text.slice(0,300))}`;
+  }catch(err){
+    pre.innerHTML = `<span class="err">Fetch threw an error: ${escapeHtml(err.message)}</span>\n\nURL:\n${url}`;
+  }
+}
+
+function parseCSV(text){
+  const rows = [];
+  let row = [], cell = "", inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i], n = text[i+1];
+    if(inQuotes){
+      if(c === '"' && n === '"'){ cell += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else { cell += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(cell); cell=""; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && n === '\n') i++;
+        row.push(cell); cell="";
+        rows.push(row); row=[];
+      } else { cell += c; }
+    }
+  }
+  if(cell.length || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+function findCol(header, names){
+  const norm = h => h.toLowerCase().replace(/[^a-z]/g,"");
+  for(const name of names){
+    const idx = header.findIndex(h => norm(h) === norm(name));
+    if(idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+
+async function runTest(){
+  document.getElementById("out").innerHTML = "";
+  for(const [label, tab] of Object.entries(TABS)){
+    await testTab(label, tab);
+  }
+}
+</script>
+</body>
+</html>
