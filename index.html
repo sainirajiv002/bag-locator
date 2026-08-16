@@ -639,44 +639,11 @@ function requireBlock(){
   return idx;
 }
 
-/* ---------- Fuzzy matching for the sort-code fallback ---------- */
-const CONFUSABLE_MAP = { "O":"0","Q":"0","D":"0","I":"1","L":"1","Z":"2","S":"5","B":"8","G":"6","T":"7" };
-function canonicalize(code){
-  return normalizeCode(code).split("").map(ch => CONFUSABLE_MAP[ch] || ch).join("");
-}
-function levenshtein(a,b){
-  const m=a.length,n=b.length;
-  const dp = Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
-  for(let j=0;j<=n;j++) dp[0][j]=j;
-  for(let i=1;i<=m;i++){
-    for(let j=1;j<=n;j++){
-      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j-1],dp[i-1][j],dp[i][j-1]);
-    }
-  }
-  return dp[m][n];
-}
+/* ---------- Exact matching for the sort-code fallback ---------- */
 function matchCode(rawInput, keySet){
   const key = normalizeCode(rawInput);
   if(!key) return {status:"empty"};
   if(keySet.has(key)) return {status:"exact", matchedKey:key};
-
-  const lengths = new Set([...keySet].map(k => k.length));
-  const closeEnoughLength = [...lengths].some(len => Math.abs(len - key.length) <= 1);
-  if(!closeEnoughLength) return {status:"notfound"};
-
-  const canonInput = canonicalize(key);
-  for(const k of keySet){
-    if(k.length === key.length && canonicalize(k) === canonInput){
-      return {status:"canonical", matchedKey:k};
-    }
-  }
-  let best = null, bestDist = Infinity;
-  for(const k of keySet){
-    if(Math.abs(k.length - key.length) > 1) continue;
-    const d = levenshtein(canonInput, canonicalize(k));
-    if(d < bestDist){ best = k; bestDist = d; }
-  }
-  if(best && bestDist <= 2) return {status:"fuzzy", matchedKey:best, distance:bestDist};
   return {status:"notfound"};
 }
 function minKeyLength(keySet){
@@ -823,17 +790,12 @@ function renderSortCodeFallback(input){
   const sellers = [...(idx.SORTCODE_SELLERS.get(match.matchedKey) || [])];
   const sellerText = sellers.length === 0 ? "—" : sellers.length === 1 ? sellers[0] : `${sellers.length} sellers use this code`;
 
-  let note = "";
-  if(match.status === "canonical" || match.status === "fuzzy"){
-    note = `Closest match to "${escapeHtml(input.toUpperCase())}" → using ${escapeHtml(match.matchedKey)}. Confirm against the tag.`;
-  }
 
   sortResults.innerHTML = tagCard({
     eyebrow: `Stage this bag at (Block ${currentBlock})`,
     big: stageCode,
     metaLeft: {k:"Sort code", v: match.matchedKey},
-    metaRight: {k:"Seller", v: sellerText},
-    note
+    metaRight: {k:"Seller", v: sellerText}
   });
   scrollToResults();
   logAudit(match.matchedKey, currentBlock);
@@ -1006,7 +968,6 @@ let tessWorker = null;
 let tessReady = false;
 let scanning = false;
 let scanTimer = null;
-let matchHistory = [];
 let rotationIndex = 0;
 const ROTATIONS = [0, 90, 270, 180];
 const SCAN_INTERVAL_MS = 250;
@@ -1073,7 +1034,6 @@ async function openCamera(){
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   camModal.classList.add("open");
   camStatus.textContent = "Starting camera…";
-  matchHistory = [];
   rotationIndex = 0;
   try{
     camStream = await navigator.mediaDevices.getUserMedia({
@@ -1128,25 +1088,13 @@ async function scanLoopStep(){
     const idx = currentBlock ? BLOCKS[currentBlock] : null;
     if(!idx){ scanTimer = setTimeout(scanLoopStep, SCAN_INTERVAL_MS); return; }
     const keys = new Set(idx.STAGING_INDEX.keys());
-    let bestExact = null, bestNear = null, bestNearDist = Infinity;
+    let bestExact = null;
     for(const w of words){
       const match = matchCode(w, keys);
       if(match.status === "exact"){ bestExact = w; break; }
-      if(match.status === "canonical" || match.status === "fuzzy"){
-        const d = match.status === "canonical" ? 0 : match.distance;
-        if(d < bestNearDist){ bestNearDist = d; bestNear = match.matchedKey; }
-      }
     }
 
     if(bestExact){ acceptScan(bestExact); return; }
-    if(bestNear){
-      matchHistory.push(bestNear);
-      if(matchHistory.length > 4) matchHistory.shift();
-      const counts = {};
-      for(const c of matchHistory) counts[c] = (counts[c]||0) + 1;
-      const winner = Object.keys(counts).find(c => counts[c] >= 2);
-      if(winner){ acceptScan(winner); return; }
-    }
   }catch(err){
     console.error(err);
   }
