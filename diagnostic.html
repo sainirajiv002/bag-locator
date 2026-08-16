@@ -15,11 +15,45 @@
 <body>
 <h1 style="font-size:18px;">Sheet Sync Diagnostic</h1>
 <button onclick="runTest()">Test Sync Now</button>
-<div id="out">Tap the button above.</div>
+
+<h1 style="font-size:18px;margin-top:30px;">Audit Log Diagnostic</h1>
+<button onclick="testAudit()" style="background:#5db2ff;">Send Test Audit Entry</button>
+<div id="auditOut"></div>
+
+<div id="out">Tap "Test Sync Now" above.</div>
 
 <script>
 const SPREADSHEET_ID = "1ai0ZHWlrr5idDfJ-UDtuVGH42WVg-YCcvPWPXvHgnmo";
 const TABS = { "Block A": "Block A", "Block B": "Block B" };
+const AUDIT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyPozFo2aTVihQmOgW4uD_kaGaL3SMUujL5MIdkUMkolO12TaO97yxNj9bEDQNVIt8A/exec";
+
+async function testAudit(){
+  const out = document.getElementById("auditOut");
+  out.innerHTML = `<pre>Sending test entry…</pre>`;
+  const payload = { timestamp: new Date().toISOString(), block: "TEST", sealId: "DIAGNOSTIC-TEST-" + Date.now() };
+
+  try{
+    const res = await fetch(AUDIT_WEBAPP_URL, {
+      method: "POST",
+      headers: {"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    out.innerHTML = `<pre><span class="${res.ok ? 'ok' : 'err'}">HTTP ${res.status}</span>\n\nSent payload:\n${escapeHtml(JSON.stringify(payload,null,2))}\n\nResponse body:\n${escapeHtml(text.slice(0,1000))}\n\n${res.ok ? 'Check your Audit sheet now — a row with sealId "'+payload.sealId+'" should be there.' : 'Non-200 response — see body above for the Apps Script error.'}</pre>`;
+  }catch(err){
+    out.innerHTML = `<pre><span class="err">Plain fetch failed: ${escapeHtml(err.message)}</span>\n\nThis usually means a CORS block, which can still mean the write succeeded server-side. Check your Audit sheet for sealId "${escapeHtml(payload.sealId)}" to know for sure.\n\nTrying no-cors mode next…</pre>`;
+    try{
+      await fetch(AUDIT_WEBAPP_URL, {
+        method: "POST", mode: "no-cors",
+        headers: {"Content-Type":"text/plain;charset=utf-8"},
+        body: JSON.stringify(payload)
+      });
+      out.innerHTML += `<pre>no-cors request sent (response can't be read by design). Check your Audit sheet for sealId "${escapeHtml(payload.sealId)}".</pre>`;
+    }catch(err2){
+      out.innerHTML += `<pre><span class="err">no-cors attempt also threw: ${escapeHtml(err2.message)}</span></pre>`;
+    }
+  }
+}
 
 async function testTab(label, tab){
   const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
