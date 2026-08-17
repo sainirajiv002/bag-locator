@@ -366,12 +366,12 @@
 
   <!-- RIDER PANEL -->
   <section id="panelFind" class="panel">
-    <label class="field-label" for="sellerInput">Seller name</label>
+    <label class="field-label" for="sellerInput">Seller or client name</label>
     <div class="ac-wrap">
-      <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller name…" autocomplete="off">
+      <input id="sellerInput" class="code-input" style="font-family:'Inter';font-size:16px;text-transform:none;letter-spacing:0;" placeholder="Start typing seller or client name…" autocomplete="off">
       <div class="ac-list" id="acList"></div>
     </div>
-    <p class="hint">Pick your seller to see the staging code(s) for their bags in the selected block.</p>
+    <p class="hint">Type either the seller name or the client name — whichever you know — to see the staging code(s) for their bags in the selected block.</p>
 
     <div class="results" id="findResults"></div>
   </section>
@@ -486,6 +486,7 @@ function parseAssignmentCSV(text){
   if(!table.length) throw new Error("Sheet is empty");
   const header = table[0];
   const sellerCol   = findCol(header, ["seller_name","Seller Name","Seller"]);
+  const clientCol   = findCol(header, ["client_name","Client Name","Client"]);
   const sortCol     = findCol(header, ["cluster_code","Cluster Code","Sort code","sort_code","SortCode"]);
   const runsheetCol = findCol(header, ["runsheet_id","dsp_latest_runsheet_id","Runsheet ID","RunsheetId"]);
   const awbCol      = findCol(header, ["awb_number","AWB","awb"]);
@@ -497,6 +498,7 @@ function parseAssignmentCSV(text){
   return table.slice(1).map(r => ({
     awb: awbCol !== -1 ? (r[awbCol]||"").trim() : "",
     seller: (r[sellerCol]||"").trim(),
+    client: clientCol !== -1 ? (r[clientCol]||"").trim() : "",
     sortCode: (r[sortCol]||"").trim(),
     runsheetId: runsheetCol !== -1 ? normalizeRunsheetId(r[runsheetCol]) : "",
     stagingCode: stagingCol !== -1 ? (r[stagingCol]||"").trim() : "",
@@ -510,6 +512,7 @@ function buildIndices(rows){
   const stagingIndex = new Map();
   const sortCodeSellers = new Map();
   const sellerSortCodes = new Map();
+  const nameRunsheets = new Map(); // name.toLowerCase() -> Set(runsheetId) — true bag count, all rows regardless of staging status
   const sellersSet = new Set();
 
   for(const row of rows){
@@ -519,6 +522,20 @@ function buildIndices(rows){
     if(row.sealCode){
       const sealKey = normalizeCode(row.sealCode);
       if(sealKey && !sealIndex.has(sealKey)) sealIndex.set(sealKey, row);
+    }
+    // Bag count = distinct runsheet IDs for this name — counted here so it
+    // reflects every bag that exists for them, not just staged ones.
+    if(row.runsheetId){
+      if(row.seller){
+        const sk = row.seller.toLowerCase();
+        if(!nameRunsheets.has(sk)) nameRunsheets.set(sk, new Set());
+        nameRunsheets.get(sk).add(row.runsheetId);
+      }
+      if(row.client){
+        const ck = row.client.toLowerCase();
+        if(!nameRunsheets.has(ck)) nameRunsheets.set(ck, new Set());
+        nameRunsheets.get(ck).add(row.runsheetId);
+      }
     }
     if(row.sortCode && row.stagingCode){
       const key = normalizeCode(row.sortCode);
@@ -531,6 +548,14 @@ function buildIndices(rows){
         if(!sellerSortCodes.has(sellerKey)) sellerSortCodes.set(sellerKey, new Set());
         sellerSortCodes.get(sellerKey).add(key);
       }
+      // Client name is searchable the exact same way as seller name —
+      // either one, whichever the rider knows, resolves to the same staging code.
+      if(row.client){
+        sellersSet.add(row.client);
+        const clientKey = row.client.toLowerCase();
+        if(!sellerSortCodes.has(clientKey)) sellerSortCodes.set(clientKey, new Set());
+        sellerSortCodes.get(clientKey).add(key);
+      }
     }
   }
 
@@ -541,6 +566,7 @@ function buildIndices(rows){
     STAGING_INDEX: stagingIndex,
     SORTCODE_SELLERS: sortCodeSellers,
     SELLER_SORTCODES: sellerSortCodes,
+    NAME_RUNSHEETS: nameRunsheets,
     SELLER_LIST: [...sellersSet].sort()
   };
 }
@@ -896,7 +922,12 @@ function selectSeller(name){
   }).join("");
   if(codes.length > 1){
     findResults.insertAdjacentHTML("afterbegin",
-      `<div class="status-note">${codes.length} bags found for this seller — check every location.</div>`);
+      `<div class="status-note">${codes.length} different staging locations for this name — check every location.</div>`);
+  }
+  const bagCount = (idx.NAME_RUNSHEETS.get(name.toLowerCase()) || new Set()).size;
+  if(bagCount > 0){
+    findResults.insertAdjacentHTML("afterbegin",
+      `<div class="status-note info"><b>${bagCount}</b> total bag${bagCount===1?"":"s"} for "${escapeHtml(name)}" in Block ${currentBlock} — make sure you pick up all of them.</div>`);
   }
 }
 
